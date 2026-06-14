@@ -1,0 +1,10 @@
+## BigWigs Packager metadata
+## https://github.com/BigWigsMods/packager
+
+package-as: blacklist by Vovo
+
+ignore:
+  - .pkgmeta
+  - .gitignore
+  - README.md
+  - .github

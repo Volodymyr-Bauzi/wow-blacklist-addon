@@ -1,0 +1,12 @@
+## Interface: 20504
+## Title: Blacklist by Vovo
+## Notes: Blacklist players with custom warning reasons and auto-alerts on join
+## Author: Vovo
+## Version: 1.0.0
+## SavedVariablesPerAccount: BV_AccountDB
+
+# Core: namespace, DB, events, roster tracking, messages, minimap, slash
+BV_Core.lua
+
+# UI: main window, tabs, scroll lists, modals, alert popup
+BV_UI.lua
