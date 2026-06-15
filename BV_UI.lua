@@ -919,106 +919,8 @@ function BV:BuildSettingsPanel(panel, w, h)
     chanDesc:SetJustifyH("LEFT")
     chanDesc:SetText("|cFF888888Alert messages are sent here. Falls back to PARTY if not in a raid, SAY if not grouped.|r")
 
-    -- ── Export / Import ────────────────────────────────────
-    SectionHeader(content, "Export / Import", -412)
-
-    local expDesc = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    expDesc:SetPoint("TOPLEFT", x0, -432)
-    expDesc:SetPoint("RIGHT",  content, "RIGHT", -x0, 0)
-    expDesc:SetJustifyH("LEFT")
-    expDesc:SetText("|cFF888888Share your blacklist with another player.\nExport generates a string — copy it and paste it in Discord or chat.\nThe other player pastes it in the Import box below and clicks Import.|r")
-
-    -- Export button
-    local exportBtn = MakeButton(content, "Export Blacklist", 160, 26)
-    exportBtn:SetPoint("TOPLEFT", x0, -476)
-
-    -- Export string display box
-    local exportEB = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
-    exportEB:SetSize(cw - x0 - 14, 26)
-    exportEB:SetPoint("TOPLEFT", x0, -510)
-    exportEB:SetAutoFocus(false)
-    exportEB:SetMaxLetters(0)
-    exportEB:SetScript("OnMouseUp", function(self)
-        self:SetFocus()
-        self:HighlightText()
-    end)
-    BV._exportEB = exportEB
-
-    local exportHint = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    exportHint:SetPoint("TOPLEFT", x0, -540)
-    exportHint:SetText("|cFF555555Click the box to select all  •  Ctrl+C to copy|r")
-
-    exportBtn:SetScript("OnClick", function()
-        if not BV.DB or (#BV.DB.reasons == 0 and #BV.DB.blacklist == 0) then
-            BV._exportEB:SetText("")
-            if BV._exportStatusFS then
-                BV._exportStatusFS:SetText("|cFFFF8888Nothing to export — the blacklist is empty.|r")
-            end
-            return
-        end
-        local str = BV:ExportData()
-        BV._exportEB:SetText(str)
-        BV._exportEB:SetFocus()
-        BV._exportEB:HighlightText()
-        if BV._exportStatusFS then BV._exportStatusFS:SetText("") end
-    end)
-
-    local exportStatusFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    exportStatusFS:SetPoint("LEFT",  exportBtn, "RIGHT", 8, 0)
-    exportStatusFS:SetPoint("RIGHT", content,   "RIGHT", -x0, 0)
-    exportStatusFS:SetJustifyH("LEFT")
-    BV._exportStatusFS = exportStatusFS
-
-    -- Import label
-    local importLabel = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    importLabel:SetPoint("TOPLEFT", x0, -558)
-    importLabel:SetText("Import (paste a string from another player):")
-
-    -- Import paste box
-    local importEB = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
-    importEB:SetSize(cw - x0 - 14, 26)
-    importEB:SetPoint("TOPLEFT", x0, -578)
-    importEB:SetAutoFocus(false)
-    importEB:SetMaxLetters(0)
-    importEB:SetScript("OnEscapePressed", function(self)
-        self:SetText("")
-        self:ClearFocus()
-    end)
-    BV._importEB = importEB
-
-    -- Replace checkbox
-    local replaceCB = MakeCheckbox(content, "Replace my existing data  (default: merge / skip duplicates)")
-    replaceCB:SetPoint("TOPLEFT", x0, -614)
-    replaceCB:SetChecked(false)
-    BV._importReplaceCB = replaceCB
-
-    -- Import button + status
-    local importBtn = MakeButton(content, "Import", 120, 26)
-    importBtn:SetPoint("TOPLEFT", x0, -644)
-
-    local importStatusFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    importStatusFS:SetPoint("LEFT",  importBtn, "RIGHT", 10, 0)
-    importStatusFS:SetPoint("RIGHT", content,   "RIGHT", -x0, 0)
-    importStatusFS:SetJustifyH("LEFT")
-    BV._importStatusFS = importStatusFS
-
-    importBtn:SetScript("OnClick", function()
-        local str     = (BV._importEB:GetText() or ""):match("^%s*(.-)%s*$")
-        local replace = BV._importReplaceCB:GetChecked() == 1 or BV._importReplaceCB:GetChecked() == true
-        local ok, msg = BV:ImportData(str, replace)
-        if ok then
-            BV._importStatusFS:SetText("|cFF88FF88" .. msg .. "|r")
-            BV._importEB:SetText("")
-            BV:RefreshReasonsList()
-            BV:RefreshBlacklistList()
-            BV:UpdateTabBadges()
-        else
-            BV._importStatusFS:SetText("|cFFFF6666" .. msg .. "|r")
-        end
-    end)
-
     -- Total content height
-    content:SetHeight(680)
+    content:SetHeight(420)
 end
 
 -- =========================================================
@@ -1052,10 +954,6 @@ function BV:RefreshSettings()
         BV._settingsChanDD:SetValue(BV.DB.globalChannel or "PARTY")
     end
 
-    -- Clear export/import status messages on open
-    if BV._exportStatusFS then BV._exportStatusFS:SetText("") end
-    if BV._importStatusFS then BV._importStatusFS:SetText("") end
-    if BV._exportEB        then BV._exportEB:SetText("") end
 end
 
 -- =========================================================
