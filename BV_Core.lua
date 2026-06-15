@@ -1,12 +1,21 @@
--- BV_Core.lua  v1.1
--- Blacklist by Vovo — Core: namespace, DB, event handling, roster tracking,
--- message sending, minimap button, slash commands, scale/sound/position helpers.
-
+-- =========================================================
+-- BV_Core.lua  –  Blacklist by Vovo  (v1.2)
+-- Logic: DB, CRUD, roster scanning, alerts, minimap, slash,
+--        chat context menu, export/import.
+-- =========================================================
 local addonName, BV = ...
 _G["BV"] = BV
 
+-- ── Channel options (shared with UI) ──────────────────────
+BV.CHANNEL_ITEMS = {
+    { text = "Party",        value = "PARTY"        },
+    { text = "Raid",         value = "RAID"         },
+    { text = "Raid Warning", value = "RAID_WARNING" },
+    { text = "Say",          value = "SAY"          },
+}
+
 -- =========================================================
--- Database Init (per-account SavedVariables)
+-- Saved-variable initialisation
 -- =========================================================
 local function EnsureDB()
     BV_AccountDB           = BV_AccountDB           or {}
@@ -14,51 +23,35 @@ local function EnsureDB()
     BV_AccountDB.blacklist = BV_AccountDB.blacklist  or {}
     BV_AccountDB.nextId    = BV_AccountDB.nextId     or 1
     BV_AccountDB.minimap   = BV_AccountDB.minimap    or { hide = false }
-
-    -- ── Settings ──────────────────────────────────────────
-    BV_AccountDB.globalChannel  = BV_AccountDB.globalChannel  or "PARTY"
-    BV_AccountDB.uiScale        = BV_AccountDB.uiScale        or 1.0
-    BV_AccountDB.alertDuration  = BV_AccountDB.alertDuration  or 8
-    if BV_AccountDB.alertSound == nil then
-        BV_AccountDB.alertSound = true          -- default ON; explicit nil-check so false persists
-    end
-    -- windowPos is nil by default (first run = centred)
-
+    BV_AccountDB.globalChannel = BV_AccountDB.globalChannel or "PARTY"
+    BV_AccountDB.uiScale       = BV_AccountDB.uiScale       or 1.0
+    BV_AccountDB.alertDuration = BV_AccountDB.alertDuration  or 8
+    if BV_AccountDB.alertSound == nil then BV_AccountDB.alertSound = true end
     BV.DB = BV_AccountDB
 end
 
 -- =========================================================
--- Reason API
+-- CRUD – Reasons
 -- =========================================================
 function BV:AddReason(name, message)
     local id = BV.DB.nextId
     BV.DB.nextId = id + 1
-    table.insert(BV.DB.reasons, {
-        id      = id,
-        name    = name    or "Unnamed",
-        message = message or "",
-    })
+    table.insert(BV.DB.reasons, { id = id, name = name or "Unnamed", message = message or "" })
     return id
 end
 
 function BV:GetReasonById(id)
-    if not id then return nil end
     for _, r in ipairs(BV.DB.reasons) do
         if r.id == id then return r end
     end
-    return nil
 end
 
-function BV:RemoveReason(id)
+function BV:DeleteReason(id)
     for i, r in ipairs(BV.DB.reasons) do
-        if r.id == id then
-            table.remove(BV.DB.reasons, i)
-            return
-        end
+        if r.id == id then table.remove(BV.DB.reasons, i); return end
     end
 end
 
--- Returns how many blacklist entries reference this reason id
 function BV:ReasonRefCount(reasonId)
     local n = 0
     for _, e in ipairs(BV.DB.blacklist) do
@@ -68,76 +61,60 @@ function BV:ReasonRefCount(reasonId)
 end
 
 -- =========================================================
--- Blacklist API
+-- CRUD – Blacklist
 -- =========================================================
 function BV:AddToBlacklist(username, reasonId)
-    BV:RemoveFromBlacklist(username:lower())     -- upsert: drop old entry first
-    table.insert(BV.DB.blacklist, {
-        key      = username:lower(),
-        username = username,
-        reasonId = reasonId,
-    })
+    local key = username:lower()
+    for _, e in ipairs(BV.DB.blacklist) do
+        if e.key == key then return false end
+    end
+    table.insert(BV.DB.blacklist, { key = key, username = username, reasonId = reasonId })
+    return true
 end
 
-function BV:GetBlacklistEntry(name)
-    local key = name:lower()
+function BV:GetBlacklistEntry(username)
+    local key = username:lower()
     for _, e in ipairs(BV.DB.blacklist) do
         if e.key == key then return e end
     end
-    return nil
 end
 
-function BV:RemoveFromBlacklist(nameOrKey)
-    local key = nameOrKey:lower()
+function BV:RemoveFromBlacklist(username)
+    local key = username:lower()
     for i, e in ipairs(BV.DB.blacklist) do
-        if e.key == key then
-            table.remove(BV.DB.blacklist, i)
-            return
-        end
+        if e.key == key then table.remove(BV.DB.blacklist, i); return end
     end
 end
 
 -- =========================================================
--- Message Sending
+-- Messaging
 -- =========================================================
 function BV:SendBlacklistMessage(message, playerName)
     local text = message
     text = text:gsub("{{username}}", playerName or "")
     text = text:gsub("{{Username}}", playerName or "")
     text = text:gsub("{{USERNAME}}", (playerName or ""):upper())
-
     local chan = (BV.DB and BV.DB.globalChannel) or "PARTY"
     if (chan == "RAID" or chan == "RAID_WARNING") and not IsInRaid()  then chan = "PARTY" end
     if  chan == "PARTY"                           and not IsInGroup() then chan = "SAY"   end
-
     if text == "" then return end
     SendChatMessage(text, chan)
 end
 
 -- =========================================================
--- Alert Sound
+-- UI helpers (scale, sound, window pos, alert pos)
 -- =========================================================
 function BV:PlayAlertSound()
     if not (BV.DB and BV.DB.alertSound) then return end
-    -- Night-elf bell — distinctive, in-game, TBC-safe
-    if PlaySoundFile then
-        PlaySoundFile("Sound\\Doodad\\BellTollNightElf.wav")
-    end
+    if PlaySoundFile then PlaySoundFile("Sound\\Doodad\\BellTollNightElf.wav") end
 end
 
--- =========================================================
--- UI Scale
--- =========================================================
 function BV:ApplyScale()
     if BV.mainFrame then
-        local scale = (BV.DB and BV.DB.uiScale) or 1.0
-        BV.mainFrame:SetScale(scale)
+        BV.mainFrame:SetScale((BV.DB and BV.DB.uiScale) or 1.0)
     end
 end
 
--- =========================================================
--- Window Position  (saved on drag-stop; restored on open)
--- =========================================================
 function BV:SaveWindowPos()
     if not BV.mainFrame or not BV.DB then return end
     local point, _, relPoint, x, y = BV.mainFrame:GetPoint()
@@ -153,10 +130,128 @@ function BV:RestoreWindowPos()
     end
 end
 
+function BV:ResetAlertPosition()
+    local f = _G["BVAlertFrame"]
+    if f then f:ClearAllPoints(); f:SetPoint("TOP", UIParent, "TOP", 0, -200) end
+    if BV.DB then BV.DB.alertPos = nil end
+end
+
 -- =========================================================
--- Group Roster Snapshot & Blacklist Check
+-- Export / Import
+--
+-- Format:  BV1;reasonName,message;reasonName2,message2;;player,reason;player2,reason2
+--   Field sep  = comma  (,)    → encoded as %2C in values
+--   Record sep = semicolon (;) → encoded as %3B in values
+--   Section sep = ";;" (empty record) divides reasons from blacklist
+--   Percent (%)                → encoded as %25 (MUST encode first / decode last)
 -- =========================================================
-BV.lastGroupSnapshot = {}
+local function PctEnc(s)
+    s = tostring(s or "")
+    s = s:gsub("%%", "%%25")   -- MUST be first
+    s = s:gsub(",",  "%%2C")
+    s = s:gsub(";",  "%%3B")
+    return s
+end
+
+local function PctDec(s)
+    s = tostring(s or "")
+    s = s:gsub("%%2C", ",")
+    s = s:gsub("%%3B", ";")
+    s = s:gsub("%%25", "%%")   -- MUST be last
+    return s
+end
+
+function BV:ExportData()
+    if not BV.DB then return "" end
+    local parts = { "BV1" }
+    for _, r in ipairs(BV.DB.reasons or {}) do
+        table.insert(parts, PctEnc(r.name) .. "," .. PctEnc(r.message))
+    end
+    table.insert(parts, "")   -- produces ";;" section divider
+    for _, e in ipairs(BV.DB.blacklist or {}) do
+        local reason = BV:GetReasonById(e.reasonId)
+        table.insert(parts, PctEnc(e.username) .. "," .. PctEnc(reason and reason.name or ""))
+    end
+    return table.concat(parts, ";")
+end
+
+-- replace=true  → wipe existing data first
+-- replace=false → merge: skip names/players already present  (default)
+function BV:ImportData(str, replace)
+    str = (str or ""):match("^%s*(.-)%s*$")
+    if str == "" then
+        return false, "Paste an export string first."
+    end
+    if str:sub(1, 4) ~= "BV1;" then
+        return false, "Invalid format — must start with BV1."
+    end
+
+    str = str:sub(5)   -- strip leading "BV1;"
+
+    -- Split on ";;" to separate reasons section from blacklist section
+    local divPos     = str:find(";;", 1, true)
+    local reasonsStr = divPos and str:sub(1, divPos - 1) or str
+    local blackStr   = divPos and str:sub(divPos + 2)   or ""
+
+    if replace then
+        BV.DB.reasons   = {}
+        BV.DB.blacklist = {}
+        BV.DB.nextId    = 1
+    end
+
+    -- Build lowercase-name → id lookup for existing reasons
+    local reasonMap = {}
+    for _, r in ipairs(BV.DB.reasons) do
+        reasonMap[r.name:lower()] = r.id
+    end
+
+    local nR, nP = 0, 0
+
+    -- Import reasons
+    for record in (reasonsStr .. ";"):gmatch("(.-);") do
+        if record ~= "" then
+            local encN, encM = record:match("^(.-),(.*)$")
+            if encN then
+                local name = PctDec(encN):match("^%s*(.-)%s*$")
+                local msg  = PctDec(encM or "")
+                if name ~= "" and not reasonMap[name:lower()] then
+                    reasonMap[name:lower()] = BV:AddReason(name, msg)
+                    nR = nR + 1
+                end
+            end
+        end
+    end
+
+    -- Import blacklist entries
+    for record in (blackStr .. ";"):gmatch("(.-);") do
+        if record ~= "" then
+            local encU, encR = record:match("^(.-),(.*)$")
+            if encU then
+                local uname = PctDec(encU):match("^%s*(.-)%s*$")
+                local rname = PctDec(encR or "")
+                if uname ~= "" then
+                    local rid = reasonMap[rname:lower()]
+                    if not rid and rname ~= "" then
+                        rid = BV:AddReason(rname, "")
+                        reasonMap[rname:lower()] = rid
+                    end
+                    if rid and not BV:GetBlacklistEntry(uname) then
+                        BV:AddToBlacklist(uname, rid)
+                        nP = nP + 1
+                    end
+                end
+            end
+        end
+    end
+
+    return true, "Done — " .. nR .. " reason(s) and " .. nP .. " player(s) imported."
+end
+
+-- =========================================================
+-- Roster scanning (TBC-safe APIs)
+-- =========================================================
+local _prevGroupMembers = {}
+local _alertTimerSeq    = 0
 
 local function GetCurrentGroupMembers()
     local members = {}
@@ -176,226 +271,212 @@ local function GetCurrentGroupMembers()
     return members
 end
 
-function BV:CheckRosterForBlacklist()
-    local current = GetCurrentGroupMembers()
-    for key, displayName in pairs(current) do
-        if not BV.lastGroupSnapshot[key] then
-            local entry = BV:GetBlacklistEntry(key)
+local function CheckForBlacklistedJoiners(current)
+    if not BV.DB then return end
+    for key, name in pairs(current) do
+        if not _prevGroupMembers[key] then
+            local entry = BV:GetBlacklistEntry(name)
             if entry then
                 local reason = BV:GetReasonById(entry.reasonId)
-                if reason then
-                    if BV.ShowBlacklistAlert then BV:ShowBlacklistAlert(displayName, reason) end
-                    BV:SendBlacklistMessage(reason.message, displayName)
+                BV:ShowAlert(name, reason and reason.name or "", reason and reason.message or "")
+                if reason and reason.message and reason.message ~= "" then
+                    BV:SendBlacklistMessage(reason.message, name)
                 end
             end
         end
     end
-    BV.lastGroupSnapshot = current
+    _prevGroupMembers = current
 end
 
 -- =========================================================
--- Event Frame
+-- Event handling
 -- =========================================================
 local eventFrame = CreateFrame("Frame")
-eventFrame:SetScript("OnEvent", function(self, event, ...)
-    if BV[event] then BV[event](BV, event, ...) end
+eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
+eventFrame:RegisterEvent("RAID_ROSTER_UPDATE")
+
+eventFrame:SetScript("OnEvent", function(self, event, arg1)
+    if event == "ADDON_LOADED" and arg1 == addonName then
+        EnsureDB()
+        BV:InitMinimap()
+        BV:InitChatContextMenu()
+        BV:RegisterSlashCommands()
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        _prevGroupMembers = GetCurrentGroupMembers()
+    elseif event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
+        local current = GetCurrentGroupMembers()
+        CheckForBlacklistedJoiners(current)
+    end
 end)
 
-local function Register(event) eventFrame:RegisterEvent(event) end
-
-function BV:ADDON_LOADED(_, name)
-    if name ~= addonName then return end
-    EnsureDB()
-    if BV.InitMinimapButton   then BV:InitMinimapButton()   end
-    if BV.InitChatContextMenu then BV:InitChatContextMenu() end
-    print("|cFF00AAFFBlacklist by Vovo|r loaded.  Type |cFFFFFF00/bv|r to open.")
-end
-
-function BV:PARTY_MEMBERS_CHANGED() BV:CheckRosterForBlacklist() end
-function BV:RAID_ROSTER_UPDATE()    BV:CheckRosterForBlacklist() end
-
-function BV:PLAYER_ENTERING_WORLD()
-    -- Snapshot on login so we don't fire alerts for the existing group
-    BV.lastGroupSnapshot = GetCurrentGroupMembers()
-end
-
-Register("ADDON_LOADED")
-Register("PARTY_MEMBERS_CHANGED")
-Register("RAID_ROSTER_UPDATE")
-Register("PLAYER_ENTERING_WORLD")
-
 -- =========================================================
--- Window Toggle
+-- Minimap
 -- =========================================================
-function BV:Toggle()
-    if not BV.mainFrame then
-        if BV.CreateMainWindow then BV:CreateMainWindow() else return end
-    end
-    if BV.mainFrame:IsShown() then
-        BV.mainFrame:Hide()
-    else
-        BV:RestoreWindowPos()
-        BV:ApplyScale()
-        BV.mainFrame:Show()
-    end
-end
-
--- =========================================================
--- Slash Commands
---   /bv              — toggle window
---   /bv minimap      — toggle minimap button visibility
---   /bv help | ?     — print help
--- =========================================================
-SLASH_BV1 = "/bv"
-SLASH_BV2 = "/blacklistbyvovo"
-SLASH_BV3 = "/blacklist"
-SlashCmdList["BV"] = function(msg)
-    msg = (msg or ""):lower():match("^%s*(.-)%s*$")
-
-    if msg == "help" or msg == "?" then
-        print("|cFF00AAFFBlacklist by Vovo|r commands:")
-        print("  |cFFFFFF00/bv|r            — toggle the window")
-        print("  |cFFFFFF00/bv minimap|r    — toggle the minimap button")
-        print("  |cFFFFFF00/bv help|r       — this list")
-        return
-    end
-
-    if msg == "minimap" then
-        if not BV.DB then return end
-        BV.DB.minimap.hide = not BV.DB.minimap.hide
-        -- Apply via LibDBIcon if available
-        local DBIcon = LibStub and LibStub("LibDBIcon-1.0", true)
-        if DBIcon then
-            if BV.DB.minimap.hide then DBIcon:Hide("BlacklistByVovo")
-            else                       DBIcon:Show("BlacklistByVovo") end
-        elseif _G["BVMinimapButton"] then
-            _G["BVMinimapButton"]:SetShown(not BV.DB.minimap.hide)
-        end
-        print("|cFF00AAFFBlacklist by Vovo:|r Minimap button " ..
-              (BV.DB.minimap.hide and "|cFFFF8888hidden|r" or "|cFF88FF88shown|r") .. ".")
-        -- Sync checkbox in Settings if panel is visible
-        if BV.SyncMinimapCheckbox then BV:SyncMinimapCheckbox() end
-        return
-    end
-
-    BV:Toggle()
-end
-
--- =========================================================
--- Minimap Button
--- =========================================================
-function BV:InitMinimapButton()
+function BV:InitMinimap()
     local LDB    = LibStub and LibStub("LibDataBroker-1.1", true)
     local DBIcon = LibStub and LibStub("LibDBIcon-1.0", true)
-
     if LDB and DBIcon then
-        BV.launcher = LDB:NewDataObject("BlacklistByVovo", {
+        local broker = LDB:NewDataObject("BlacklistByVovo", {
             type  = "launcher",
-            icon  = "Interface\\Icons\\Ability_Rogue_ShadowStrikes",
-            OnClick = function(_, button)
-                if button == "LeftButton" then BV:Toggle() end
+            text  = "Blacklist by Vovo",
+            icon  = "Interface\\Icons\\INV_Misc_Book_09",
+            OnClick = function(_, btn)
+                BV:ToggleMainWindow()
             end,
             OnTooltipShow = function(tt)
-                tt:AddLine("|cFF00AAFFBlacklist by Vovo|r")
-                tt:AddLine("|cff00ff00Left-Click:|r Open / Close", 1, 1, 1)
-                tt:AddLine("|cFFAAAAFFRight-Click:|r Minimap options", 1, 1, 1)
+                tt:AddLine("|cFFFFFFFFBlacklist by Vovo|r")
+                tt:AddLine("|cFFAAAAFFLeft-click to open|r")
             end,
         })
-        DBIcon:Register("BlacklistByVovo", BV.launcher, BV.DB.minimap)
-        return
+        BV.DB.minimap = BV.DB.minimap or { hide = false }
+        DBIcon:Register("BlacklistByVovo", broker, BV.DB.minimap)
+    else
+        BV:CreateFallbackMinimapButton()
     end
-
-    BV:CreateFallbackMinimapButton()
 end
 
 function BV:CreateFallbackMinimapButton()
+    if _G["BVMinimapButton"] then return end
     local btn = CreateFrame("Button", "BVMinimapButton", Minimap)
-    btn:SetSize(32, 32)
+    btn:SetSize(31, 31)
     btn:SetFrameStrata("MEDIUM")
-    btn:SetPoint("TOPRIGHT", Minimap, "TOPRIGHT", -2, -2)
+    btn:SetFrameLevel(8)
+    btn:SetNormalTexture("Interface\\Icons\\INV_Misc_Book_09")
+    btn:GetNormalTexture():SetTexCoord(0.1, 0.9, 0.1, 0.9)
+    btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
 
-    local bg = btn:CreateTexture(nil, "BACKGROUND")
-    bg:SetSize(26, 26); bg:SetPoint("CENTER")
-    bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+    local bd = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+    bd:SetAllPoints()
+    bd:SetBackdrop({ bgFile = "Interface\\Minimap\\MiniMap-TrackingBorder" })
 
-    local icon = btn:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(20, 20); icon:SetPoint("CENTER")
-    icon:SetTexture("Interface\\Icons\\Ability_Rogue_ShadowStrikes")
+    local angle = 225
+    local function UpdatePos()
+        local rad = math.rad(angle)
+        btn:SetPoint("CENTER", Minimap, "CENTER", 80 * math.cos(rad), 80 * math.sin(rad))
+    end
+    UpdatePos()
 
-    local border = btn:CreateTexture(nil, "OVERLAY")
-    border:SetSize(54, 54); border:SetPoint("CENTER")
-    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-
-    btn:SetScript("OnClick", function() BV:Toggle() end)
+    btn:RegisterForDrag("LeftButton")
+    btn:SetScript("OnDragStart", function(self)
+        self:SetScript("OnUpdate", function()
+            local cx, cy = Minimap:GetCenter()
+            local mx, my = GetCursorPosition()
+            local s = UIParent:GetEffectiveScale()
+            mx, my = mx / s, my / s
+            angle = math.deg(math.atan2(my - cy, mx - cx))
+            UpdatePos()
+        end)
+    end)
+    btn:SetScript("OnDragStop", function(self)
+        self:SetScript("OnUpdate", nil)
+    end)
+    btn:SetScript("OnClick", function(self, button)
+        if button == "LeftButton" then BV:ToggleMainWindow() end
+    end)
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("|cFF00AAFFBlacklist by Vovo|r")
-        GameTooltip:AddLine("Click to open/close", 1, 1, 1)
+        GameTooltip:AddLine("|cFFFFFFFFBlacklist by Vovo|r")
+        GameTooltip:AddLine("|cFFAAAAFFClick to open|r")
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Respect hide setting
-    if BV.DB and BV.DB.minimap and BV.DB.minimap.hide then btn:Hide() end
+    if BV.DB and BV.DB.minimap and BV.DB.minimap.hide then
+        btn:Hide()
+    end
 end
 
 -- =========================================================
--- Chat Right-Click Context Menu
+-- Slash commands
+-- =========================================================
+function BV:RegisterSlashCommands()
+    SLASH_BV1 = "/bv"
+    SLASH_BV2 = "/blacklistbyvovo"
+    SLASH_BV3 = "/blacklist"
+    SlashCmdList["BV"] = function(msg)
+        msg = (msg or ""):lower():match("^%s*(.-)%s*$")
+        if msg == "minimap" then
+            if BV.DB then BV.DB.minimap.hide = not BV.DB.minimap.hide end
+            local hidden  = BV.DB and BV.DB.minimap.hide
+            local DBIcon  = LibStub and LibStub("LibDBIcon-1.0", true)
+            if DBIcon then
+                if hidden then DBIcon:Hide("BlacklistByVovo") else DBIcon:Show("BlacklistByVovo") end
+            elseif _G["BVMinimapButton"] then
+                _G["BVMinimapButton"]:SetShown(not hidden)
+            end
+            if BV.SyncMinimapCheckbox then BV:SyncMinimapCheckbox() end
+            print("Blacklist by Vovo: Minimap button " .. (hidden and "hidden" or "shown") .. ".")
+        elseif msg == "help" then
+            print("|cFF00FF00Blacklist by Vovo commands:|r")
+            print("  /bv            — open/close window")
+            print("  /bv minimap    — toggle minimap button")
+            print("  /bv help       — this help")
+        else
+            BV:ToggleMainWindow()
+        end
+    end
+end
+
+-- =========================================================
+-- Chat context menu (right-click a player name)
 -- =========================================================
 function BV:InitChatContextMenu()
-    if BV._contextMenuInited then return end
-    BV._contextMenuInited = true
+    UnitPopupButtons["BV_BLACKLIST_ADD"] = {
+        text   = "Add to Blacklist",
+        dist   = 0,
+        nested = 0,
+    }
+    UnitPopupButtons["BV_BLACKLIST_REMOVE"] = {
+        text   = "Remove from Blacklist",
+        dist   = 0,
+        nested = 0,
+    }
 
-    UnitPopupButtons["BV_BLACKLIST_ADD"]    = { text = "Add to Blacklist",    dist = 0, notCheckable = 1 }
-    UnitPopupButtons["BV_BLACKLIST_REMOVE"] = { text = "Remove from Blacklist", dist = 0, notCheckable = 1 }
-
-    local menuTypes = { "PLAYER", "PARTY", "RAID_PLAYER", "CHAT_ROSTER", "FRIEND" }
-    for _, mt in ipairs(menuTypes) do
-        local list = UnitPopupMenus[mt]
-        if list then
-            local n = #list
-            local insertAt = (list[n] == "CANCEL") and n or (n + 1)
-            table.insert(list, insertAt,     "BV_BLACKLIST_ADD")
-            table.insert(list, insertAt + 1, "BV_BLACKLIST_REMOVE")
+    local menus = { "PLAYER", "PARTY", "RAID_PLAYER", "CHAT_ROSTER", "FRIEND" }
+    for _, m in ipairs(menus) do
+        if UnitPopupMenus[m] then
+            table.insert(UnitPopupMenus[m], "BV_BLACKLIST_ADD")
+            table.insert(UnitPopupMenus[m], "BV_BLACKLIST_REMOVE")
         end
     end
 
-    hooksecurefunc("SetItemRef", function(link, text, button)
-        if button == "RightButton" then
-            local n = link:match("^player:([^%-:]+)")
-            if n then BV._contextName = n end
+    -- Capture name from chat hyperlinks
+    hooksecurefunc("SetItemRef", function(link)
+        if link:match("^player:") then
+            local name = link:match("^player:([^:]+)")
+            if name and name ~= "" then BV._contextName = name end
         end
     end)
 
-    hooksecurefunc("UnitPopup_ShowMenu", function(dropdownMenu, which, unit, name, userData)
+    -- Capture name from unit frames / raid frames
+    hooksecurefunc("UnitPopup_ShowMenu", function(_, which, unit, name)
         if name and name ~= "" then
             BV._contextName = name
         elseif unit and unit ~= "" then
-            local n = UnitName(unit)
-            if n then BV._contextName = n end
+            local uName = UnitName(unit)
+            if uName then BV._contextName = uName end
         end
     end)
 
+    -- Handle selection
     hooksecurefunc("UnitPopup_OnClick", function(self)
-        local btn = self.value
-        if btn ~= "BV_BLACKLIST_ADD" and btn ~= "BV_BLACKLIST_REMOVE" then return end
-        local name = BV._contextName or ""
-        if name == "" then return end
+        local button = self.value
+        local name   = BV._contextName
+        if not name or name == "" then return end
 
-        if btn == "BV_BLACKLIST_ADD" then
+        if button == "BV_BLACKLIST_ADD" then
             if BV:GetBlacklistEntry(name) then
-                print("|cFF00AAFFBlacklist by Vovo:|r |cFFFFFF00" .. name .. "|r is already blacklisted.")
-            else
-                if BV.ShowPlayerModal then BV:ShowPlayerModal(nil, name) end
+                print("|cFFFF4444Blacklist by Vovo:|r " .. name .. " is already blacklisted.")
+                return
             end
-        elseif btn == "BV_BLACKLIST_REMOVE" then
-            if BV:GetBlacklistEntry(name) then
-                BV:RemoveFromBlacklist(name)
-                if BV.RefreshBlacklistList then BV:RefreshBlacklistList() end
-                print("|cFF00AAFFBlacklist by Vovo:|r Removed |cFFFFFF00" .. name .. "|r from blacklist.")
-            else
-                print("|cFF00AAFFBlacklist by Vovo:|r |cFFFFFF00" .. name .. "|r is not on your blacklist.")
-            end
+            BV:OpenAddBlacklistModal(name)
+
+        elseif button == "BV_BLACKLIST_REMOVE" then
+            BV:RemoveFromBlacklist(name)
+            BV:RefreshBlacklistList()
+            print("|cFFFF4444Blacklist by Vovo:|r Removed " .. name .. " from the blacklist.")
         end
     end)
 end

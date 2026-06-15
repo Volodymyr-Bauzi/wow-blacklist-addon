@@ -1,99 +1,77 @@
--- BV_UI.lua  v1.1
--- Blacklist by Vovo — UI: main window, tabs, scroll lists, modals, alert popup.
--- All visual code lives here; BV_Core.lua owns data + events.
+-- =========================================================
+-- BV_UI.lua  –  Blacklist by Vovo  (v1.2)
+-- All visual code: main window, tabs, modals, alert banner,
+-- settings panel (now scrollable + Export/Import section).
+-- =========================================================
 
-local addonName, BV = ...
-BV.UI = BV.UI or {}
+local _, BV = ...
+
+-- ── Layout constants ──────────────────────────────────────
+local WINDOW_W = 520
+local WINDOW_H = 520
+local HDR_H    = 32
+local TAB_H    = 30
 
 -- =========================================================
--- Static Popup Dialogs
+-- Shared helpers
 -- =========================================================
-StaticPopupDialogs["BV_CONFIRM_DEL_REASON"] = {
-    text          = "Delete reason \"%s\"?",
-    button1       = YES,
-    button2       = NO,
-    OnAccept      = function(self, data)
-        BV:RemoveReason(data)
-        BV:RefreshReasonsList()
-        BV:UpdateTabBadges()
-    end,
-    timeout        = 0,
-    whileDead      = true,
-    hideOnEscape   = true,
-    preferredIndex = 3,
-}
 
-StaticPopupDialogs["BV_CONFIRM_DEL_REASON_WARN"] = {
-    text          = "Delete reason \"%s\"?\n\n|cFFFF8888Warning:|r %d player(s) are assigned this reason.\nThey will show as '(reason deleted)' until reassigned.",
-    button1       = YES,
-    button2       = NO,
-    OnAccept      = function(self, data)
-        BV:RemoveReason(data)
-        BV:RefreshReasonsList()
-        BV:UpdateTabBadges()
-    end,
-    timeout        = 0,
-    whileDead      = true,
-    hideOnEscape   = true,
-    preferredIndex = 3,
-}
-
-StaticPopupDialogs["BV_CONFIRM_DEL_PLAYER"] = {
-    text          = "Remove \"%s\" from blacklist?",
-    button1       = YES,
-    button2       = NO,
-    OnAccept      = function(self, data)
-        BV:RemoveFromBlacklist(data)
-        BV:RefreshBlacklistList()
-        BV:UpdateTabBadges()
-    end,
-    timeout        = 0,
-    whileDead      = true,
-    hideOnEscape   = true,
-    preferredIndex = 3,
-}
-
--- =========================================================
--- Theme helpers
--- =========================================================
-local function ApplyBackdrop(f, r, g, b, a, br, bg_, bb, ba)
-    f:SetBackdrop({
-        bgFile   = "Interface/ChatFrame/ChatFrameBackground",
-        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    f:SetBackdropColor(r or 0.05, g or 0.06, b or 0.08, a or 0.97)
-    f:SetBackdropBorderColor(br or 0.4, bg_ or 0.4, bb or 0.4, ba or 1)
-end
-
-local function ApplyDarkRow(f)
-    ApplyBackdrop(f, 0.06, 0.07, 0.09, 0.90, 0.18, 0.20, 0.25, 0.90)
-end
-
-local function MakeButton(parent, label, w, h)
-    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btn:SetSize(w or 80, h or 22)
-    btn:SetText(label or "")
-    return btn
-end
-
-local function SectionHeader(parent, text, y)
-    local bar = parent:CreateTexture(nil, "ARTWORK")
-    bar:SetPoint("TOPLEFT",  12, y)
-    bar:SetPoint("TOPRIGHT", -12, y)
-    bar:SetHeight(1)
-    bar:SetColorTexture(0.25, 0.30, 0.40, 0.8)
+-- Plain coloured section divider
+local function SectionHeader(parent, text, yOff)
+    local line = parent:CreateTexture(nil, "ARTWORK")
+    line:SetSize(parent:GetWidth() - 28, 1)
+    line:SetPoint("TOPLEFT", 14, yOff)
+    line:SetColorTexture(0.3, 0.3, 0.3, 0.6)
     local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    fs:SetPoint("TOPLEFT", 14, y - 3)
-    fs:SetText("|cFF8899BB" .. text .. "|r")
+    fs:SetPoint("TOPLEFT", 14, yOff + 10)
+    fs:SetTextColor(0.55, 0.55, 0.55)
+    fs:SetText(text:upper())
     return fs
 end
 
--- =========================================================
--- Slider widget  (uses OptionsSliderTemplate for native thumb)
--- Returns: slider, valueLabelFS
--- =========================================================
+-- Button with BackdropTemplate highlight
+local function MakeButton(parent, label, w, h)
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    btn:SetSize(w or 120, h or 26)
+    btn:SetBackdrop({
+        bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        tile = true, tileSize = 4, edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    btn:SetBackdropColor(0.15, 0.15, 0.15, 0.9)
+    btn:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+    local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    fs:SetAllPoints()
+    fs:SetText(label)
+    btn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.25, 0.25, 0.25, 0.9)
+        self:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+    end)
+    btn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0.15, 0.15, 0.15, 0.9)
+        self:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
+    end)
+    return btn
+end
+
+-- Checkbox with label
+local function MakeCheckbox(parent, labelText)
+    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    cb:SetSize(24, 24)
+    local lbl = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+    lbl:SetText(labelText or "")
+    cb._lbl = lbl
+    cb:SetScript("OnClick", function(self)
+        if self.onChange then
+            self.onChange(self:GetChecked() == 1 or self:GetChecked() == true)
+        end
+    end)
+    return cb
+end
+
+-- Named slider (for OptionsSliderTemplate child access)
 local _bvSliderIdx = 0
 local function MakeSlider(parent, minVal, maxVal, step, w)
     _bvSliderIdx = _bvSliderIdx + 1
@@ -102,467 +80,679 @@ local function MakeSlider(parent, minVal, maxVal, step, w)
     slider:SetWidth(w or 220)
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
-    -- Suppress the template's auto labels (we draw our own)
-    local lo = _G[sName .. "Low"]
-    local hi = _G[sName .. "High"]
-    local tx = _G[sName .. "Text"]
-    if lo then lo:SetText("") end
-    if hi then hi:SetText("") end
-    if tx then tx:SetText("") end
+    local lo = _G[sName .. "Low"];  if lo  then lo:SetText("")  end
+    local hi = _G[sName .. "High"]; if hi  then hi:SetText("")  end
+    local tx = _G[sName .. "Text"]; if tx  then tx:SetText("")  end
 
-    -- Min/Max text flanking the slider
+    -- flanking min/max labels + current-value label
     local minFS = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    minFS:SetPoint("RIGHT", slider, "LEFT", -6, 0)
-    minFS:SetTextColor(0.7, 0.7, 0.7)
-    minFS:SetText(tostring(minVal))
-    slider._minFS = minFS
-
+    minFS:SetPoint("RIGHT", slider, "LEFT", -4, 0)
     local maxFS = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    maxFS:SetPoint("LEFT", slider, "RIGHT", 6, 0)
-    maxFS:SetTextColor(0.7, 0.7, 0.7)
-    maxFS:SetText(tostring(maxVal))
+    maxFS:SetPoint("LEFT", slider, "RIGHT", 4, 0)
+    local valFS = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    valFS:SetPoint("TOP", slider, "BOTTOM", 0, -2)
+
+    slider._minFS = minFS
     slider._maxFS = maxFS
-
-    -- Current-value label (right of maxFS)
-    local valFS = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    valFS:SetPoint("LEFT", maxFS, "RIGHT", 8, 0)
     slider._valFS = valFS
-
     return slider
 end
 
--- =========================================================
--- Checkbox widget
--- Returns: checkFrame (has :SetChecked() / :GetChecked() / .onChange)
--- =========================================================
-local function MakeCheckbox(parent, labelText)
-    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-    cb:SetSize(24, 24)
-    -- create label separately (template child name depends on frame name)
-    local lbl = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-    lbl:SetText(labelText or "")
-    cb._lbl = lbl
-    cb:SetScript("OnClick", function(self)
-        if self.onChange then self.onChange(self:GetChecked() == 1 or self:GetChecked() == true) end
-    end)
-    return cb
-end
+-- Simple custom dropdown (avoids UIDropDownMenu complexity in TBC)
+local _bvDDActive = nil
 
--- =========================================================
--- Custom Dropdown
--- =========================================================
 local function CreateDropdown(parent, width)
-    width = width or 150
-    local frame = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    frame:SetSize(width, 24)
-    ApplyBackdrop(frame, 0.08, 0.08, 0.10, 0.95, 0.25, 0.25, 0.28, 1)
+    local dd = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    dd:SetSize(width, 22)
+    dd:SetBackdrop({
+        bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        tile = true, tileSize = 4, edgeSize = 1,
+        insets = { left = 0, right = 0, top = 0, bottom = 0 },
+    })
+    dd:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
+    dd:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
 
-    local lbl = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    lbl:SetPoint("LEFT", 8, 0); lbl:SetPoint("RIGHT", -22, 0)
-    lbl:SetJustifyH("LEFT"); lbl:SetText("Select...")
-    frame._lbl = lbl
+    local label = dd:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    label:SetPoint("LEFT",  6, 0)
+    label:SetPoint("RIGHT", -18, 0)
+    label:SetJustifyH("LEFT")
 
-    local arrow = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    arrow:SetPoint("RIGHT", -6, 0); arrow:SetText("▼")
+    local arrowFS = dd:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    arrowFS:SetPoint("RIGHT", -4, 0)
+    arrowFS:SetText("▼")
 
+    local clickZone = CreateFrame("Button", nil, dd)
+    clickZone:SetAllPoints()
+
+    dd._items  = {}
+    dd._value  = nil
+    dd._label  = label
+
+    -- Popup list (UIParent parent for z-order above modals)
     local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    popup:SetSize(width, 10)
-    popup:SetFrameStrata("TOOLTIP"); popup:SetFrameLevel(500)
-    ApplyBackdrop(popup, 0.08, 0.08, 0.10, 0.98, 0.30, 0.30, 0.35, 1)
+    popup:SetFrameStrata("TOOLTIP")
+    popup:SetFrameLevel(500)
+    popup:SetBackdrop({
+        bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        tile = true, tileSize = 4, edgeSize = 1,
+        insets = { left = 0, right = 0, top = 0, bottom = 0 },
+    })
+    popup:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
+    popup:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
     popup:Hide()
+    dd._popup = popup
 
-    frame._items = {}; frame._value = nil; frame._btns = {}; frame._popup = popup
+    local ITEM_H  = 22
+    local itemBtns = {}
 
-    local function Close() popup:Hide(); arrow:SetText("▼") end
-
-    local function Open()
-        popup:ClearAllPoints()
-        popup:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, -2)
-        popup:SetWidth(frame:GetWidth())
-        for _, b in ipairs(frame._btns) do b:Hide() end
-        local yOff = -4
-        for i, item in ipairs(frame._items) do
-            local b = frame._btns[i]
-            if not b then
-                b = CreateFrame("Button", nil, popup)
-                b:SetHeight(22)
-                b._fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                b._fs:SetPoint("LEFT", b, "LEFT", 8, 0)
-                b._fs:SetPoint("RIGHT", b, "RIGHT", -4, 0)
-                b._fs:SetJustifyH("LEFT")
-                local hl = b:CreateTexture(nil, "HIGHLIGHT")
-                hl:SetAllPoints(); hl:SetColorTexture(1,1,1,0.08)
-                frame._btns[i] = b
-            end
-            b:SetPoint("TOPLEFT", 4, yOff); b:SetWidth(popup:GetWidth()-8)
-            b._fs:SetText(item.text)
-            local cv = item.value
-            b:SetScript("OnClick", function()
-                frame:SetValue(cv); Close()
-                if frame.onChange then frame.onChange(cv) end
+    local function RebuildPopup()
+        for _, b in ipairs(itemBtns) do b:Hide(); b:SetParent(nil) end
+        itemBtns = {}
+        popup:SetWidth(dd:GetWidth())
+        popup:SetHeight(#dd._items * ITEM_H + 2)
+        for i, item in ipairs(dd._items) do
+            local row = CreateFrame("Button", nil, popup)
+            row:SetSize(dd:GetWidth(), ITEM_H)
+            row:SetPoint("TOPLEFT", 0, -1 - (i - 1) * ITEM_H)
+            local hl = row:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.08)
+            local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            fs:SetPoint("LEFT", 6, 0); fs:SetText(item.text)
+            row:SetScript("OnClick", function()
+                dd._value = item.value
+                label:SetText(item.text)
+                popup:Hide(); _bvDDActive = nil
+                if dd.onChange then dd.onChange(item.value) end
             end)
-            b:Show(); yOff = yOff - 22
+            table.insert(itemBtns, row)
         end
-        popup:SetHeight(math.abs(yOff)+4); popup:Show(); arrow:SetText("▲")
     end
 
-    frame:SetScript("OnClick", function() if popup:IsShown() then Close() else Open() end end)
-    function frame:SetItems(list) self._items = list end
-    function frame:GetValue()     return self._value   end
-    function frame:Close()        Close()              end
-    function frame:SetValue(val)
-        self._value = val
-        for _, item in ipairs(self._items) do
-            if item.value == val then self._lbl:SetText(item.text); return end
+    clickZone:SetScript("OnClick", function()
+        if popup:IsShown() then
+            popup:Hide(); _bvDDActive = nil
+        else
+            if _bvDDActive and _bvDDActive ~= popup then
+                _bvDDActive:Hide()
+            end
+            RebuildPopup()
+            popup:ClearAllPoints()
+            popup:SetPoint("TOPLEFT", dd, "BOTTOMLEFT", 0, -1)
+            popup:Show()
+            _bvDDActive = popup
         end
-        self._lbl:SetText(val and tostring(val) or "Select...")
+    end)
+
+    function dd:SetItems(itemList)
+        dd._items = itemList
     end
-    return frame
+
+    function dd:SetValue(value)
+        dd._value = value
+        for _, item in ipairs(dd._items) do
+            if item.value == value then
+                label:SetText(item.text)
+                return
+            end
+        end
+        label:SetText(value or "")
+    end
+
+    function dd:GetValue()
+        return dd._value
+    end
+
+    return dd
 end
 
 -- =========================================================
--- Shared constants
+-- Scrollable list helpers used by Reasons & Blacklist panels
 -- =========================================================
-local CHANNEL_ITEMS = {
-    { text = "SAY",          value = "SAY"          },
-    { text = "PARTY",        value = "PARTY"        },
-    { text = "RAID",         value = "RAID"         },
-    { text = "RAID WARNING", value = "RAID_WARNING" },
+local function MakeScrollList(parent, w, h)
+    local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+    sf:SetSize(w - 24, h)
+    local content = CreateFrame("Frame", nil, sf)
+    content:SetSize(w - 40, 1)
+    sf:SetScrollChild(content)
+    return sf, content
+end
+
+-- =========================================================
+-- Alert banner  (draggable, click to dismiss)
+-- =========================================================
+local alertFrame = CreateFrame("Frame", "BVAlertFrame", UIParent, "BackdropTemplate")
+alertFrame:SetSize(360, 90)
+alertFrame:SetFrameStrata("DIALOG")
+alertFrame:SetFrameLevel(300)
+alertFrame:SetBackdrop({
+    bgFile   = "Interface\\Buttons\\WHITE8x8",
+    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+    tile = true, tileSize = 32, edgeSize = 20,
+    insets = { left = 8, right = 8, top = 8, bottom = 8 },
+})
+alertFrame:SetBackdropColor(0.14, 0, 0, 0.93)
+alertFrame:SetBackdropBorderColor(0.65, 0.08, 0.08, 1)
+alertFrame:SetPoint("TOP", UIParent, "TOP", 0, -200)
+alertFrame:EnableMouse(true)
+alertFrame:SetMovable(true)
+alertFrame:RegisterForDrag("LeftButton")
+alertFrame:Hide()
+
+local alertTitle = alertFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+alertTitle:SetPoint("TOP", 0, -14)
+alertTitle:SetTextColor(1, 0.25, 0.25)
+
+local alertBody = alertFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+alertBody:SetPoint("TOPLEFT", 16, -38)
+alertBody:SetPoint("BOTTOMRIGHT", -16, 10)
+alertBody:SetJustifyH("LEFT")
+alertBody:SetJustifyV("TOP")
+
+alertFrame:SetScript("OnDragStart", function(self)
+    self:StartMoving()
+    self.dragging = true
+end)
+alertFrame:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    self.dragging = false
+    if BV.DB then
+        local point, _, relPoint, x, y = self:GetPoint()
+        BV.DB.alertPos = { point = point, relPoint = relPoint, x = x, y = y }
+    end
+end)
+alertFrame:SetScript("OnMouseUp", function(self, btn)
+    if btn == "LeftButton" and not self.dragging then
+        self:Hide()
+    end
+end)
+
+local _alertSeq = 0
+
+function BV:ShowAlert(name, reasonName, message)
+    local f = _G["BVAlertFrame"]
+    if not f then return end
+
+    if BV.DB and BV.DB.alertPos then
+        local p = BV.DB.alertPos
+        f:ClearAllPoints()
+        f:SetPoint(p.point or "TOP", UIParent, p.relPoint or "TOP", p.x or 0, p.y or -200)
+    else
+        f:ClearAllPoints()
+        f:SetPoint("TOP", UIParent, "TOP", 0, -200)
+    end
+
+    alertTitle:SetText("|cFFFF3333⚠ BLACKLISTED: " .. name .. "|r")
+
+    local body = "|cFFFFFF00Reason:|r " .. (reasonName ~= "" and reasonName or "Unknown")
+    if message and message ~= "" then
+        local preview = message
+            :gsub("{{username}}", name)
+            :gsub("{{Username}}", name)
+            :gsub("{{USERNAME}}", name:upper())
+        body = body .. "\n|cFF999999" .. preview .. "|r"
+    end
+    alertBody:SetText(body)
+
+    f:Show()
+    BV:PlayAlertSound()
+
+    _alertSeq = _alertSeq + 1
+    local seq = _alertSeq
+    local dur = (BV.DB and BV.DB.alertDuration) or 8
+    C_Timer.After(dur, function()
+        if seq == _alertSeq then f:Hide() end
+    end)
+end
+
+-- =========================================================
+-- Confirm / StaticPopup dialogs
+-- =========================================================
+StaticPopupDialogs["BV_CONFIRM_DEL_REASON"] = {
+    text    = "Delete reason \"|cFFFFFF00%s|r\"?",
+    button1 = "Delete",
+    button2 = "Cancel",
+    OnAccept = function(self, data)
+        BV:DeleteReason(data)
+        BV:RefreshReasonsList()
+        BV:UpdateTabBadges()
+    end,
+    timeout    = 0,
+    whileDead  = true,
+    hideOnEscape = true,
 }
 
-local CHAN_COLOR = {
-    SAY          = "FFFFFF",
-    PARTY        = "44AAFF",
-    RAID         = "FF8800",
-    RAID_WARNING = "FF3333",
+StaticPopupDialogs["BV_CONFIRM_DEL_REASON_WARN"] = {
+    text    = "Delete reason \"|cFFFFFF00%s|r\"?\n|cFFFF8800Warning:|r %d blacklisted player(s) use this reason and will become orphaned.",
+    button1 = "Delete Anyway",
+    button2 = "Cancel",
+    OnAccept = function(self, data)
+        BV:DeleteReason(data)
+        BV:RefreshReasonsList()
+        BV:UpdateTabBadges()
+    end,
+    timeout    = 0,
+    whileDead  = true,
+    hideOnEscape = true,
+}
+
+StaticPopupDialogs["BV_CONFIRM_DEL_BLACKLIST"] = {
+    text    = "Remove |cFFFF4444%s|r from the blacklist?",
+    button1 = "Remove",
+    button2 = "Cancel",
+    OnAccept = function(self, data)
+        local entry = BV.DB.blacklist[data]
+        if entry then
+            BV:RemoveFromBlacklist(entry.username)
+            BV:RefreshBlacklistList()
+            BV:UpdateTabBadges()
+        end
+    end,
+    timeout    = 0,
+    whileDead  = true,
+    hideOnEscape = true,
 }
 
 -- =========================================================
--- Modal Factory
+-- Modal factory
 -- =========================================================
-local MODAL_TITLE_H = 28
+local function MakeModal(title, w, h)
+    local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    f:SetSize(w or 360, h or 200)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("TOOLTIP")
+    f:SetFrameLevel(200)
+    f:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    })
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
 
-local function CreateModal(name, w, h, titleText)
-    local f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
-    f:SetSize(w, h); f:SetPoint("CENTER"); f:Hide()
-    f:SetFrameStrata("TOOLTIP"); f:SetFrameLevel(200)
-    ApplyBackdrop(f, 0.05, 0.06, 0.08, 0.97, 0.45, 0.45, 0.55, 1)
-    f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop",  f.StopMovingOrSizing)
+    table.insert(UISpecialFrames, f:GetName() or "BVModal")
 
-    local hdrTex = f:CreateTexture(nil, "ARTWORK")
-    hdrTex:SetPoint("TOPLEFT", 5, -5); hdrTex:SetPoint("TOPRIGHT", -5, -5)
-    hdrTex:SetHeight(MODAL_TITLE_H - 6); hdrTex:SetColorTexture(0.10, 0.12, 0.16, 1)
-
-    local titleFS = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    titleFS:SetPoint("TOP", 0, -8); titleFS:SetText(titleText or "")
-    f.titleFS = titleFS
+    local titleFS = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    titleFS:SetPoint("TOP", 0, -14)
+    titleFS:SetText(title or "")
+    f._titleFS = titleFS
 
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", 0, 0)
+    closeBtn:SetSize(26, 26)
+    closeBtn:SetPoint("TOPRIGHT", -4, -4)
     closeBtn:SetScript("OnClick", function() f:Hide() end)
 
-    local content = CreateFrame("Frame", nil, f)
-    content:SetPoint("TOPLEFT",     8, -(MODAL_TITLE_H + 4))
-    content:SetPoint("BOTTOMRIGHT", -8, 8)
-    f.content = content
+    f:Hide()
+    return f
+end
 
-    function f:Open() self:SetPoint("CENTER"); self:Show(); self:Raise() end
-    if name then tinsert(UISpecialFrames, name) end
+-- Input row helper inside modals
+local function MakeModalInput(parent, label, y, w)
+    local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    lbl:SetPoint("TOPLEFT", 18, y)
+    lbl:SetText(label)
+    local eb = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    eb:SetSize(w or 300, 22)
+    eb:SetPoint("TOPLEFT", 18, y - 18)
+    eb:SetAutoFocus(false)
+    eb:SetMaxLetters(128)
+    return eb
+end
+
+-- =========================================================
+-- Reasons modal (Add / Edit)
+-- =========================================================
+local reasonModal = MakeModal("Add Reason", 360, 210)
+local reasonModalNameEB    = MakeModalInput(reasonModal, "Name:",    -44, 310)
+local reasonModalMessageEB = MakeModalInput(reasonModal, "Message:", -82, 310)
+local reasonModalHint = reasonModal:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+reasonModalHint:SetPoint("TOPLEFT", 18, -116)
+reasonModalHint:SetText("|cFF888888Use {{username}} to insert the player's name.|r")
+
+local reasonModalSaveBtn   = MakeButton(reasonModal, "Save",   100, 26)
+local reasonModalCancelBtn = MakeButton(reasonModal, "Cancel", 100, 26)
+reasonModalSaveBtn:SetPoint("BOTTOMLEFT",   18,  16)
+reasonModalCancelBtn:SetPoint("BOTTOMRIGHT", -18, 16)
+
+reasonModalCancelBtn:SetScript("OnClick", function() reasonModal:Hide() end)
+
+local _editingReason = nil
+
+function BV:OpenAddReasonModal()
+    _editingReason = nil
+    reasonModal._titleFS:SetText("Add Reason")
+    reasonModalNameEB:SetText("")
+    reasonModalMessageEB:SetText("")
+    reasonModalNameEB:SetFocus()
+    reasonModal:Show()
+end
+
+function BV:OpenEditReasonModal(reason)
+    _editingReason = reason
+    reasonModal._titleFS:SetText("Edit Reason")
+    reasonModalNameEB:SetText(reason.name)
+    reasonModalMessageEB:SetText(reason.message)
+    reasonModalNameEB:SetFocus()
+    reasonModal:Show()
+end
+
+reasonModalSaveBtn:SetScript("OnClick", function()
+    local name = reasonModalNameEB:GetText():match("^%s*(.-)%s*$")
+    local msg  = reasonModalMessageEB:GetText():match("^%s*(.-)%s*$")
+    if name == "" then return end
+    if _editingReason then
+        _editingReason.name    = name
+        _editingReason.message = msg
+    else
+        BV:AddReason(name, msg)
+    end
+    reasonModal:Hide()
+    BV:RefreshReasonsList()
+    BV:UpdateTabBadges()
+end)
+
+-- =========================================================
+-- Add to Blacklist modal (from right-click context menu)
+-- =========================================================
+local ablModal = MakeModal("Blacklist Player", 340, 170)
+local ablModalNameFS = ablModal:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+ablModalNameFS:SetPoint("TOPLEFT", 18, -44)
+
+local ablModalReasonDD = CreateDropdown(ablModal, 290)
+ablModalReasonDD:SetPoint("TOPLEFT", 18, -76)
+
+local ablModalHint = ablModal:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+ablModalHint:SetPoint("TOPLEFT", 18, -104)
+ablModalHint:SetText("|cFF888888Select the reason to attach.|r")
+
+local ablModalAddBtn    = MakeButton(ablModal, "Add",    100, 26)
+local ablModalCancelBtn = MakeButton(ablModal, "Cancel", 100, 26)
+ablModalAddBtn:SetPoint("BOTTOMLEFT",   18,  16)
+ablModalCancelBtn:SetPoint("BOTTOMRIGHT", -18, 16)
+ablModalCancelBtn:SetScript("OnClick", function() ablModal:Hide() end)
+
+local _ablTargetName = nil
+
+function BV:OpenAddBlacklistModal(playerName)
+    if not BV.DB or #BV.DB.reasons == 0 then
+        print("|cFFFF4444Blacklist by Vovo:|r Add at least one reason in the Reasons tab first.")
+        BV:ToggleMainWindow()
+        return
+    end
+    _ablTargetName = playerName
+    ablModalNameFS:SetText("Player: |cFFFF4444" .. playerName .. "|r")
+
+    local items = {}
+    for _, r in ipairs(BV.DB.reasons) do
+        table.insert(items, { text = r.name, value = r.id })
+    end
+    ablModalReasonDD:SetItems(items)
+    ablModalReasonDD:SetValue(BV.DB.reasons[1].id)
+
+    ablModal:Show()
+end
+
+ablModalAddBtn:SetScript("OnClick", function()
+    local reasonId = ablModalReasonDD:GetValue()
+    if not _ablTargetName or not reasonId then return end
+    BV:AddToBlacklist(_ablTargetName, reasonId)
+    BV:RefreshBlacklistList()
+    BV:UpdateTabBadges()
+    ablModal:Hide()
+    print("|cFF00FF00Blacklist by Vovo:|r Added |cFFFF4444" .. _ablTargetName .. "|r to the blacklist.")
+end)
+
+-- =========================================================
+-- Main window
+-- =========================================================
+function BV:BuildMainWindow()
+    local f = CreateFrame("Frame", "BVMainFrame", UIParent, "BackdropTemplate")
+    f:SetSize(WINDOW_W, WINDOW_H)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("HIGH")
+    f:SetFrameLevel(100)
+    f:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    })
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop",  function(self)
+        self:StopMovingOrSizing()
+        BV:SaveWindowPos()
+    end)
+    table.insert(UISpecialFrames, "BVMainFrame")
+
+    -- Header
+    local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    hdr:SetPoint("TOP", 0, -10)
+    hdr:SetText("|cFFFF4444Blacklist|r by Vovo")
+
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    closeBtn:SetSize(26, 26)
+    closeBtn:SetPoint("TOPRIGHT", -4, -4)
+    closeBtn:SetScript("OnClick", function() BV:ToggleMainWindow() end)
+
+    BV.mainFrame = f
+    f:Hide()
     return f
 end
 
 -- =========================================================
--- Tab Badge Helper
+-- Tabs
 -- =========================================================
-function BV:UpdateTabBadges()
-    if not BV.DB then return end
-    local rc = #(BV.DB.reasons   or {})
-    local bc = #(BV.DB.blacklist or {})
-    if BV._tabLabelR then
-        local badge = rc > 0 and (" |cFFAAAAAA(" .. rc .. ")|r") or ""
-        BV._tabLabelR:SetText("Reasons" .. badge)
-    end
-    if BV._tabLabelB then
-        local badge = bc > 0 and (" |cFFAAAAAA(" .. bc .. ")|r") or ""
-        BV._tabLabelB:SetText("Blacklisted" .. badge)
-    end
-end
-
--- =========================================================
--- Main Window
--- =========================================================
-local WINDOW_W = 660
-local WINDOW_H = 520
-local HDR_H    = 32
-local TAB_H    = 30
-local ROW_H    = 30
-local ROW_PAD  = 2
-
-function BV:CreateMainWindow()
-    if BV.mainFrame then return end
-
-    local frame = CreateFrame("Frame", "BVMainFrame", UIParent, "BackdropTemplate")
-    BV.mainFrame = frame
-    frame:SetSize(WINDOW_W, WINDOW_H)
-    frame:SetPoint("CENTER")
-    frame:SetMovable(true); frame:EnableMouse(true); frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop",  function(f)
-        f:StopMovingOrSizing()
-        BV:SaveWindowPos()          -- persist position
-    end)
-    frame:SetFrameStrata("DIALOG"); frame:SetFrameLevel(10)
-    ApplyBackdrop(frame, 0.04, 0.04, 0.06, 0.97, 0.35, 0.38, 0.50, 1)
-    frame:Hide()
-    tinsert(UISpecialFrames, "BVMainFrame")
-
-    -- Title bar
-    local titleFS = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    titleFS:SetPoint("TOPLEFT", 14, -8)
-    titleFS:SetText("|cFF00AAFFBlacklist|r by Vovo")
-
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -2, -2)
-
-    -- ── Tabs ─────────────────────────────────────────────
-    local tabY = -(HDR_H + 2)
-
-    local tabR = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    tabR:SetSize(170, TAB_H); tabR:SetPoint("TOPLEFT", 8, tabY)
-
-    local tabB = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    tabB:SetSize(190, TAB_H); tabB:SetPoint("TOPLEFT", tabR, "TOPRIGHT", 3, 0)
-
-    local tabS = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    tabS:SetSize(110, TAB_H); tabS:SetPoint("TOPLEFT", tabB, "TOPRIGHT", 3, 0)
-
-    local function StyleTab(tab, active)
-        if active then ApplyBackdrop(tab, 0.10, 0.14, 0.22, 1.0, 0.25, 0.55, 1.0, 1)
-        else            ApplyBackdrop(tab, 0.07, 0.07, 0.09, 0.90, 0.20, 0.20, 0.25, 1) end
-    end
-
-    -- Store label refs so UpdateTabBadges() can update them
-    local tabRFS = tabR:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    tabRFS:SetAllPoints(); tabRFS:SetJustifyH("CENTER")
-    BV._tabLabelR = tabRFS
-
-    local tabBFS = tabB:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    tabBFS:SetAllPoints(); tabBFS:SetJustifyH("CENTER")
-    BV._tabLabelB = tabBFS
-
-    local tabSFS = tabS:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    tabSFS:SetAllPoints(); tabSFS:SetJustifyH("CENTER"); tabSFS:SetText("Settings")
-
-    -- ── Content Panels ───────────────────────────────────
-    local panelY = tabY - TAB_H - 4
-    local panelW = WINDOW_W - 16
+function BV:BuildTabs(f)
+    local panelW = WINDOW_W - 28
     local panelH = WINDOW_H - HDR_H - TAB_H - 14
+    local panelY = -(HDR_H + TAB_H + 4)
 
-    local function MakePanel()
-        local p = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-        p:SetSize(panelW, panelH); p:SetPoint("TOPLEFT", 8, panelY)
-        ApplyBackdrop(p, 0.03, 0.03, 0.04, 0.80, 0.14, 0.14, 0.20, 0.80)
-        return p
+    -- Tab buttons
+    local tabDefs = {
+        { label = "Reasons",     key = "reasons"   },
+        { label = "Blacklisted", key = "blacklist" },
+        { label = "Settings",    key = "settings"  },
+    }
+    local tabBtns  = {}
+    local tabW     = math.floor(panelW / #tabDefs)
+
+    for i, def in ipairs(tabDefs) do
+        local btn = CreateFrame("Button", nil, f, "BackdropTemplate")
+        btn:SetSize(tabW, TAB_H)
+        btn:SetPoint("TOPLEFT", 14 + (i - 1) * tabW, -(HDR_H + 4))
+        btn:SetBackdrop({
+            bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            tile = true, tileSize = 4, edgeSize = 1,
+            insets = { left = 0, right = 0, top = 0, bottom = 0 },
+        })
+        btn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+        btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+
+        local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        lbl:SetAllPoints()
+        lbl:SetText(def.label)
+        def._lbl = lbl
+
+        if def.key == "reasons"   then BV._tabLabelR = lbl end
+        if def.key == "blacklist" then BV._tabLabelB = lbl end
+
+        table.insert(tabBtns, { btn = btn, key = def.key })
     end
 
-    local reasonsPanel   = MakePanel()
-    local blacklistPanel = MakePanel()
-    local settingsPanel  = MakePanel()
-
-    BV:BuildReasonsPanel(reasonsPanel,    panelW, panelH)
-    BV:BuildBlacklistPanel(blacklistPanel, panelW, panelH)
-    BV:BuildSettingsPanel(settingsPanel,   panelW, panelH)
-
-    -- ── Tab Switch ───────────────────────────────────────
-    local function SwitchTab(which)
-        BV._activeTab = which
-        StyleTab(tabR, which == "reasons")
-        StyleTab(tabB, which == "blacklist")
-        StyleTab(tabS, which == "settings")
-        reasonsPanel:SetShown(which == "reasons")
-        blacklistPanel:SetShown(which == "blacklist")
-        settingsPanel:SetShown(which == "settings")
-        if which == "reasons"   then BV:RefreshReasonsList()   end
-        if which == "blacklist" then BV:RefreshBlacklistList() end
-        if which == "settings"  then BV:RefreshSettings()      end
+    -- Panels
+    local panels = {}
+    for _, def in ipairs(tabDefs) do
+        local p = CreateFrame("Frame", nil, f, "BackdropTemplate")
+        p:SetSize(panelW, panelH)
+        p:SetPoint("TOPLEFT", 14, panelY)
+        p:SetBackdrop({
+            bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            tile = true, tileSize = 4, edgeSize = 1,
+            insets = { left = 0, right = 0, top = 0, bottom = 0 },
+        })
+        p:SetBackdropColor(0.06, 0.06, 0.06, 0.85)
+        p:SetBackdropBorderColor(0.22, 0.22, 0.22, 1)
+        p:Hide()
+        panels[def.key] = p
     end
 
-    tabR:SetScript("OnClick", function() SwitchTab("reasons")   end)
-    tabB:SetScript("OnClick", function() SwitchTab("blacklist") end)
-    tabS:SetScript("OnClick", function() SwitchTab("settings")  end)
+    -- Build content
+    BV:BuildReasonsPanel(panels["reasons"],   panelW, panelH)
+    BV:BuildBlacklistPanel(panels["blacklist"], panelW, panelH)
+    BV:BuildSettingsPanel(panels["settings"],  panelW, panelH)
 
-    SwitchTab("reasons")
-    BV:UpdateTabBadges()
+    BV._panels = panels
 
-    -- Restore saved position & scale now that the window is built
-    BV:RestoreWindowPos()
-    BV:ApplyScale()
+    -- ShowTab
+    local function ShowTab(key)
+        for k, p in pairs(panels) do
+            p:SetShown(k == key)
+        end
+        for _, t in ipairs(tabBtns) do
+            if t.key == key then
+                t.btn:SetBackdropColor(0.2, 0.2, 0.2, 0.95)
+                t.btn:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+            else
+                t.btn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+                t.btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+            end
+        end
+        if key == "reasons"   then BV:RefreshReasonsList() end
+        if key == "blacklist" then BV:RefreshBlacklistList() end
+        if key == "settings"  then BV:RefreshSettings() end
+        BV._activeTab = key
+    end
+
+    for _, t in ipairs(tabBtns) do
+        t.btn:SetScript("OnClick", function() ShowTab(t.key) end)
+    end
+
+    BV._showTab = ShowTab
+    ShowTab("reasons")
 end
 
 -- =========================================================
--- Reasons Panel
+-- Tab 1 – Reasons
 -- =========================================================
 function BV:BuildReasonsPanel(panel, w, h)
+    local toolH = 34
     local addBtn = MakeButton(panel, "+ Add Reason", 130, 26)
-    addBtn:SetPoint("TOPLEFT", 8, -6)
-    addBtn:SetScript("OnClick", function() BV:ShowReasonModal(nil) end)
+    addBtn:SetPoint("TOPRIGHT", -8, -4)
+    addBtn:SetScript("OnClick", function() BV:OpenAddReasonModal() end)
 
-    local hdrY = -36
-    local function ColHdr(parent, text, x, cw)
-        local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        fs:SetPoint("TOPLEFT", x, hdrY); fs:SetWidth(cw)
-        fs:SetJustifyH("LEFT"); fs:SetTextColor(0.7, 0.7, 0.7, 1); fs:SetText(text)
-    end
-    ColHdr(panel, "REASON NAME", 10,  160)
-    ColHdr(panel, "MESSAGE",     178, 300)
+    local sf, content = MakeScrollList(panel, w, h - toolH - 8)
+    sf:SetPoint("TOPLEFT", 4, -(toolH))
 
-    local sep = panel:CreateTexture(nil, "ARTWORK")
-    sep:SetPoint("TOPLEFT", 8, -50); sep:SetPoint("TOPRIGHT", -8, -50)
-    sep:SetHeight(1); sep:SetColorTexture(0.25, 0.25, 0.30, 0.8)
-
-    local sf = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", 0, -54); sf:SetPoint("BOTTOMRIGHT", -26, 4)
-    BV._reasonsSF = sf
-
-    local content = CreateFrame("Frame", nil, sf)
-    content:SetWidth(w - 30); content:SetHeight(10)
-    sf:SetScrollChild(content)
     BV._reasonsContent = content
-
-    local emptyFS = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    emptyFS:SetPoint("CENTER", 0, 0)
-    emptyFS:SetText("|cFF666666No reasons added yet.\nClick  '+ Add Reason'  to create one.|r")
-    emptyFS:SetJustifyH("CENTER")
-    BV._reasonsEmpty = emptyFS
-
-    BV._reasonsRows = {}
+    BV:RefreshReasonsList()
 end
 
 function BV:RefreshReasonsList()
-    if not BV._reasonsContent then return end
     local content = BV._reasonsContent
-    local rows    = BV._reasonsRows
-    local w       = content:GetWidth()
-    local reasons = (BV.DB and BV.DB.reasons) or {}
-    for _, r in ipairs(rows) do r:Hide() end
+    if not content or not BV.DB then return end
 
-    if #reasons == 0 then
-        BV._reasonsEmpty:Show(); content:SetHeight(80)
-        BV:UpdateTabBadges(); return
-    end
-    BV._reasonsEmpty:Hide()
+    -- Clear old rows
+    for _, c in ipairs({ content:GetChildren() }) do c:Hide() end
 
-    local y = 4
-    for i, reason in ipairs(reasons) do
-        local row = rows[i]
-        if not row then row = BV:_CreateReasonRow(content); rows[i] = row end
-        row:SetWidth(w - 4); row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", 2, -y); row:Show()
-        BV:_PopulateReasonRow(row, reason)
-        y = y + ROW_H + ROW_PAD
+    local list  = BV.DB.reasons or {}
+    local rowH  = 44
+    local rowW  = content:GetWidth()
+
+    for i, reason in ipairs(list) do
+        local row = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        row:SetSize(rowW, rowH)
+        row:SetPoint("TOPLEFT", 0, -(i - 1) * (rowH + 2))
+        row:SetBackdrop({
+            bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            tile = true, tileSize = 4,
+            insets = { left = 0, right = 0, top = 0, bottom = 0 },
+        })
+        row:SetBackdropColor(i % 2 == 0 and 0.08 or 0.11, 0.08, 0.08, 0.7)
+
+        local nameFS = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        nameFS:SetPoint("TOPLEFT", 8, -6)
+        nameFS:SetText("|cFFFF9944" .. reason.name .. "|r")
+
+        local msgFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        msgFS:SetPoint("TOPLEFT", 8, -22)
+        msgFS:SetPoint("RIGHT",  -90, 0)
+        msgFS:SetJustifyH("LEFT")
+        msgFS:SetText("|cFF888888" .. (reason.message ~= "" and reason.message or "(no message)") .. "|r")
+
+        local refFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        refFS:SetPoint("RIGHT", -52, 0)
+        local refs = BV:ReasonRefCount(reason.id)
+        refFS:SetText(refs > 0 and ("|cFFAAAA44" .. refs .. " player(s)|r") or "")
+
+        local editBtn = MakeButton(row, "Edit", 44, 22)
+        editBtn:SetPoint("RIGHT", -46, 0)
+        local capturedReason = reason
+        editBtn:SetScript("OnClick", function()
+            BV:OpenEditReasonModal(capturedReason)
+        end)
+
+        local delBtn = MakeButton(row, "✕", 36, 22)
+        delBtn:SetPoint("RIGHT", 0, 0)
+        delBtn:SetScript("OnClick", function()
+            local r2 = BV:ReasonRefCount(capturedReason.id)
+            if r2 > 0 then
+                StaticPopup_Show("BV_CONFIRM_DEL_REASON_WARN", capturedReason.name, r2, capturedReason.id)
+            else
+                StaticPopup_Show("BV_CONFIRM_DEL_REASON", capturedReason.name, nil, capturedReason.id)
+            end
+        end)
     end
-    content:SetHeight(math.max(y + 4, 80))
+
+    content:SetHeight(math.max(1, #list * (rowH + 2)))
     BV:UpdateTabBadges()
 end
 
-function BV:_CreateReasonRow(parent)
-    local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    row:SetHeight(ROW_H); ApplyDarkRow(row)
-
-    local nameFS = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    nameFS:SetPoint("LEFT", 8, 0); nameFS:SetWidth(155); nameFS:SetJustifyH("LEFT")
-    row.nameFS = nameFS
-
-    local msgFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    msgFS:SetPoint("LEFT", 172, 0); msgFS:SetPoint("RIGHT", -162, 0); msgFS:SetJustifyH("LEFT")
-    row.msgFS = msgFS
-
-    local delBtn  = MakeButton(row, "Delete", 72, 22); delBtn:SetPoint("RIGHT",  -6,  0)
-    local editBtn = MakeButton(row, "Edit",   72, 22); editBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
-    row.delBtn = delBtn; row.editBtn = editBtn
-    return row
-end
-
-function BV:_PopulateReasonRow(row, reason)
-    row.nameFS:SetText("|cFFFFCC00" .. (reason.name or "") .. "|r")
-    local msg = reason.message or ""
-    if #msg > 55 then msg = msg:sub(1, 52) .. "..." end
-    row.msgFS:SetText("|cFF888888" .. msg .. "|r")
-
-    row.editBtn:SetScript("OnClick", function() BV:ShowReasonModal(reason) end)
-    row.delBtn:SetScript("OnClick", function()
-        local refs = BV:ReasonRefCount(reason.id)
-        if refs > 0 then
-            StaticPopup_Show("BV_CONFIRM_DEL_REASON_WARN", reason.name, refs, reason.id)
-        else
-            StaticPopup_Show("BV_CONFIRM_DEL_REASON", reason.name, nil, reason.id)
-        end
-    end)
-end
-
 -- =========================================================
--- Blacklist Panel
+-- Tab 2 – Blacklisted Players
 -- =========================================================
 function BV:BuildBlacklistPanel(panel, w, h)
-    local addBtn = MakeButton(panel, "+ Add Player", 130, 26)
-    addBtn:SetPoint("TOPLEFT", 8, -6)
-    addBtn:SetScript("OnClick", function() BV:ShowPlayerModal(nil) end)
-
+    local toolH = 34
     -- Search bar
-    local searchLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    searchLbl:SetPoint("TOPRIGHT", -170, -9)
-    searchLbl:SetText("|cFF888888Filter:|r")
-
     local searchEB = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    searchEB:SetSize(155, 22); searchEB:SetPoint("TOPRIGHT", -8, -6)
-    searchEB:SetAutoFocus(false); searchEB:SetMaxLetters(50)
-    searchEB:SetScript("OnTextChanged", function() BV:RefreshBlacklistList() end)
-    searchEB:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+    searchEB:SetSize(w - 32, 22)
+    searchEB:SetPoint("TOPLEFT", 8, -6)
+    searchEB:SetAutoFocus(false)
+    searchEB:SetMaxLetters(64)
+    local ph = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ph:SetPoint("LEFT", searchEB, "LEFT", 4, 0)
+    ph:SetTextColor(0.4, 0.4, 0.4)
+    ph:SetText("Search player name…")
+    searchEB:SetScript("OnTextChanged", function(self)
+        ph:SetShown(self:GetText() == "")
+        BV:RefreshBlacklistList()
+    end)
     BV._blacklistSearch = searchEB
 
-    local hdrY = -36
-    local function ColHdr(parent, text, x, cw)
-        local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        fs:SetPoint("TOPLEFT", x, hdrY); fs:SetWidth(cw)
-        fs:SetJustifyH("LEFT"); fs:SetTextColor(0.7, 0.7, 0.7, 1); fs:SetText(text)
-    end
-    ColHdr(panel, "PLAYER NAME", 10,  200)
-    ColHdr(panel, "REASON",      218, 200)
-
-    local sep = panel:CreateTexture(nil, "ARTWORK")
-    sep:SetPoint("TOPLEFT", 8, -50); sep:SetPoint("TOPRIGHT", -8, -50)
-    sep:SetHeight(1); sep:SetColorTexture(0.25, 0.25, 0.30, 0.8)
-
-    local sf = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", 0, -54); sf:SetPoint("BOTTOMRIGHT", -26, 4)
-    BV._blacklistSF = sf
-
-    local content = CreateFrame("Frame", nil, sf)
-    content:SetWidth(w - 30); content:SetHeight(10)
-    sf:SetScrollChild(content)
+    local sf, content = MakeScrollList(panel, w, h - toolH - 8)
+    sf:SetPoint("TOPLEFT", 4, -(toolH))
     BV._blacklistContent = content
-
-    local emptyFS = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    emptyFS:SetPoint("CENTER", 0, 0)
-    emptyFS:SetText("|cFF666666No players blacklisted yet.\nClick  '+ Add Player'  or right-click a name in chat.|r")
-    emptyFS:SetJustifyH("CENTER")
-    BV._blacklistEmpty = emptyFS
-
-    BV._blacklistRows = {}
+    BV:RefreshBlacklistList()
 end
 
 function BV:RefreshBlacklistList()
-    if not BV._blacklistContent then return end
     local content = BV._blacklistContent
-    local rows    = BV._blacklistRows
-    local w       = content:GetWidth()
-    local list    = (BV.DB and BV.DB.blacklist) or {}
-    local query   = (BV._blacklistSearch and BV._blacklistSearch:GetText():lower()) or ""
+    if not content or not BV.DB then return end
 
-    -- Build filtered list
+    for _, c in ipairs({ content:GetChildren() }) do c:Hide() end
+
+    local list  = BV.DB.blacklist or {}
+    local query = (BV._blacklistSearch and BV._blacklistSearch:GetText():lower()) or ""
+
     local filtered = {}
     for _, entry in ipairs(list) do
         if query == "" or (entry.username or ""):lower():find(query, 1, true) then
@@ -570,89 +760,79 @@ function BV:RefreshBlacklistList()
         end
     end
 
-    for _, r in ipairs(rows) do r:Hide() end
+    local rowH = 44
+    local rowW = content:GetWidth()
 
-    local showEmpty = (#list == 0) or (query ~= "" and #filtered == 0)
-    if showEmpty then
-        BV._blacklistEmpty:Show()
-        if #list == 0 then
-            BV._blacklistEmpty:SetText("|cFF666666No players blacklisted yet.\nClick  '+ Add Player'  or right-click a name in chat.|r")
-        else
-            BV._blacklistEmpty:SetText("|cFF666666No players match \"" .. query .. "\".|r")
-        end
-        content:SetHeight(80); BV:UpdateTabBadges(); return
-    end
-    BV._blacklistEmpty:Hide()
-
-    local y = 4
     for i, entry in ipairs(filtered) do
-        local row = rows[i]
-        if not row then row = BV:_CreateBlacklistRow(content); rows[i] = row end
-        row:SetWidth(w - 4); row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", 2, -y); row:Show()
-        BV:_PopulateBlacklistRow(row, entry)
-        y = y + ROW_H + ROW_PAD
+        local reason = BV:GetReasonById(entry.reasonId)
+        local row = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        row:SetSize(rowW, rowH)
+        row:SetPoint("TOPLEFT", 0, -(i - 1) * (rowH + 2))
+        row:SetBackdrop({
+            bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            tile = true, tileSize = 4,
+            insets = { left = 0, right = 0, top = 0, bottom = 0 },
+        })
+        row:SetBackdropColor(i % 2 == 0 and 0.08 or 0.11, 0.06, 0.06, 0.7)
+
+        local nameFS = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        nameFS:SetPoint("TOPLEFT", 8, -6)
+        nameFS:SetText("|cFFFF4444" .. (entry.username or "?") .. "|r")
+
+        local reasonFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        reasonFS:SetPoint("TOPLEFT", 8, -22)
+        reasonFS:SetPoint("RIGHT", -46, 0)
+        reasonFS:SetJustifyH("LEFT")
+        reasonFS:SetText(reason and ("|cFFFF9944" .. reason.name .. "|r") or "|cFFFF4444(missing reason)|r")
+
+        local delBtn = MakeButton(row, "✕", 36, 22)
+        delBtn:SetPoint("RIGHT", 0, 0)
+        local capturedIdx = #BV.DB.blacklist  -- stable index trick: use username key
+        local capturedName = entry.username
+        delBtn:SetScript("OnClick", function()
+            BV:RemoveFromBlacklist(capturedName)
+            BV:RefreshBlacklistList()
+            BV:UpdateTabBadges()
+        end)
     end
-    content:SetHeight(math.max(y + 4, 80))
+
+    content:SetHeight(math.max(1, #filtered * (rowH + 2)))
     BV:UpdateTabBadges()
 end
 
-function BV:_CreateBlacklistRow(parent)
-    local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    row:SetHeight(ROW_H); ApplyDarkRow(row)
-
-    local nameFS = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    nameFS:SetPoint("LEFT", 8, 0); nameFS:SetWidth(200); nameFS:SetJustifyH("LEFT")
-    row.nameFS = nameFS
-
-    local reasonFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    reasonFS:SetPoint("LEFT", 216, 0); reasonFS:SetWidth(220); reasonFS:SetJustifyH("LEFT")
-    row.reasonFS = reasonFS
-
-    local delBtn  = MakeButton(row, "Remove", 76, 22); delBtn:SetPoint("RIGHT", -6, 0)
-    local editBtn = MakeButton(row, "Edit",   72, 22); editBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
-    row.delBtn = delBtn; row.editBtn = editBtn
-    return row
-end
-
-function BV:_PopulateBlacklistRow(row, entry)
-    row.nameFS:SetText("|cFFFFFFFF" .. (entry.username or "") .. "|r")
-    local reason = BV:GetReasonById(entry.reasonId)
-    if reason then
-        row.reasonFS:SetText("|cFFFFCC00" .. reason.name .. "|r")
-    else
-        row.reasonFS:SetText("|cFFFF4444(reason deleted)|r")
-    end
-    row.editBtn:SetScript("OnClick", function() BV:ShowPlayerModal(entry) end)
-    row.delBtn:SetScript("OnClick",  function()
-        StaticPopup_Show("BV_CONFIRM_DEL_PLAYER", entry.username, nil, entry.key or entry.username)
-    end)
-end
-
 -- =========================================================
--- Settings Panel  (Tab 3)
+-- Tab 3 – Settings  (scrollable)
 -- =========================================================
+local CHANNEL_ITEMS = BV.CHANNEL_ITEMS
+
 function BV:BuildSettingsPanel(panel, w, h)
-    local x0 = 14   -- left indent for all controls
+    -- Wrap all content in a scroll frame so the panel can grow beyond its height
+    local sf = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT",     0,   0)
+    sf:SetPoint("BOTTOMRIGHT", -26, 0)
 
-    -- ── Display ──────────────────────────────────────────
-    SectionHeader(panel, "Display", -14)
+    local cw = w - 30   -- content width
+    local content = CreateFrame("Frame", nil, sf)
+    content:SetWidth(cw)
+    content:SetHeight(10)   -- adjusted at the end
+    sf:SetScrollChild(content)
 
-    local scaleTitleFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    local x0 = 14
+
+    -- ── Display ────────────────────────────────────────────
+    SectionHeader(content, "Display", -14)
+
+    local scaleTitleFS = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     scaleTitleFS:SetPoint("TOPLEFT", x0, -34)
     scaleTitleFS:SetText("Window & Text Scale:")
 
-    local scaleSlider = MakeSlider(panel, 75, 150, 5, 220)
-    scaleSlider:SetPoint("TOPLEFT", x0 + 38, -52)   -- offset so min label has room
-
-    -- Override auto min/max labels with % suffix
+    local scaleSlider = MakeSlider(content, 75, 150, 5, 220)
+    scaleSlider:SetPoint("TOPLEFT", x0 + 38, -52)
     scaleSlider._minFS:SetText("75%")
     scaleSlider._maxFS:SetText("150%")
-
     local scaleVal = math.floor(((BV.DB and BV.DB.uiScale) or 1.0) * 100)
     scaleSlider:SetValue(scaleVal)
     scaleSlider._valFS:SetText(scaleVal .. "%")
-
     scaleSlider:SetScript("OnValueChanged", function(self, val)
         val = math.floor(val)
         self._valFS:SetText(val .. "%")
@@ -661,26 +841,24 @@ function BV:BuildSettingsPanel(panel, w, h)
     end)
     BV._scaleSlider = scaleSlider
 
-    local scaleHint = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    scaleHint:SetPoint("TOPLEFT", x0, -72)
+    local scaleHint = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    scaleHint:SetPoint("TOPLEFT", x0, -76)
     scaleHint:SetText("|cFF555555Scales the entire window and all text inside it.|r")
 
-    -- ── Alert ─────────────────────────────────────────────
-    SectionHeader(panel, "Alert", -98)
+    -- ── Alert ──────────────────────────────────────────────
+    SectionHeader(content, "Alert", -100)
 
-    local durTitleFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    durTitleFS:SetPoint("TOPLEFT", x0, -118)
+    local durTitleFS = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    durTitleFS:SetPoint("TOPLEFT", x0, -120)
     durTitleFS:SetText("Alert Banner Duration (seconds):")
 
-    local durSlider = MakeSlider(panel, 3, 20, 1, 220)
-    durSlider:SetPoint("TOPLEFT", x0 + 24, -136)
+    local durSlider = MakeSlider(content, 3, 20, 1, 220)
+    durSlider:SetPoint("TOPLEFT", x0 + 24, -138)
     durSlider._minFS:SetText("3s")
     durSlider._maxFS:SetText("20s")
-
     local durVal = (BV.DB and BV.DB.alertDuration) or 8
     durSlider:SetValue(durVal)
     durSlider._valFS:SetText(durVal .. "s")
-
     durSlider:SetScript("OnValueChanged", function(self, val)
         val = math.floor(val)
         self._valFS:SetText(val .. "s")
@@ -688,338 +866,230 @@ function BV:BuildSettingsPanel(panel, w, h)
     end)
     BV._durSlider = durSlider
 
-    local soundCB = MakeCheckbox(panel, "Play alert sound when a blacklisted player joins")
-    soundCB:SetPoint("TOPLEFT", x0, -164)
+    local soundCB = MakeCheckbox(content, "Play alert sound when a blacklisted player joins")
+    soundCB:SetPoint("TOPLEFT", x0, -168)
     soundCB:SetChecked((BV.DB and BV.DB.alertSound) ~= false)
-    soundCB.onChange = function(checked)
-        if BV.DB then BV.DB.alertSound = checked end
-    end
+    soundCB.onChange = function(checked) if BV.DB then BV.DB.alertSound = checked end end
     BV._soundCB = soundCB
 
-    local resetAlertBtn = MakeButton(panel, "Reset Alert Banner Position", 220, 26)
-    resetAlertBtn:SetPoint("TOPLEFT", x0, -196)
+    local resetAlertBtn = MakeButton(content, "Reset Alert Banner Position", 220, 26)
+    resetAlertBtn:SetPoint("TOPLEFT", x0, -200)
     resetAlertBtn:SetScript("OnClick", function() BV:ResetAlertPosition() end)
 
-    -- ── Minimap ───────────────────────────────────────────
-    SectionHeader(panel, "Minimap", -238)
+    -- ── Minimap ────────────────────────────────────────────
+    SectionHeader(content, "Minimap", -242)
 
-    local minimapCB = MakeCheckbox(panel, "Show minimap button")
-    minimapCB:SetPoint("TOPLEFT", x0, -258)
+    local minimapCB = MakeCheckbox(content, "Show minimap button")
+    minimapCB:SetPoint("TOPLEFT", x0, -262)
     minimapCB:SetChecked(not (BV.DB and BV.DB.minimap and BV.DB.minimap.hide))
     minimapCB.onChange = function(checked)
         if BV.DB then BV.DB.minimap.hide = not checked end
         local DBIcon = LibStub and LibStub("LibDBIcon-1.0", true)
         if DBIcon then
-            if checked then DBIcon:Show("BlacklistByVovo")
-            else             DBIcon:Hide("BlacklistByVovo") end
+            if checked then DBIcon:Show("BlacklistByVovo") else DBIcon:Hide("BlacklistByVovo") end
         elseif _G["BVMinimapButton"] then
             _G["BVMinimapButton"]:SetShown(checked)
         end
     end
     BV._minimapCB = minimapCB
 
-    -- Expose sync function so slash command can update the checkbox
     function BV:SyncMinimapCheckbox()
         if BV._minimapCB then
             BV._minimapCB:SetChecked(not (BV.DB and BV.DB.minimap and BV.DB.minimap.hide))
         end
     end
 
-    -- ── Message Channel ───────────────────────────────────
-    SectionHeader(panel, "Message Channel", -296)
+    -- ── Message Channel ────────────────────────────────────
+    SectionHeader(content, "Message Channel", -300)
 
-    local chanLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    chanLabel:SetPoint("TOPLEFT", x0, -316)
+    local chanLabel = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    chanLabel:SetPoint("TOPLEFT", x0, -320)
     chanLabel:SetText("Default Output Channel:")
 
-    local chanDD = CreateDropdown(panel, 220)
-    chanDD:SetPoint("TOPLEFT", x0, -334)
+    local chanDD = CreateDropdown(content, 220)
+    chanDD:SetPoint("TOPLEFT", x0, -344)
     chanDD:SetItems(CHANNEL_ITEMS)
     chanDD:SetValue((BV.DB and BV.DB.globalChannel) or "PARTY")
-    chanDD.onChange = function(value)
-        if BV.DB then BV.DB.globalChannel = value end
-    end
+    chanDD.onChange = function(value) if BV.DB then BV.DB.globalChannel = value end end
     BV._settingsChanDD = chanDD
 
-    local chanDesc = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    chanDesc:SetPoint("TOPLEFT", x0, -364)
-    chanDesc:SetPoint("RIGHT", -x0, 0)
+    local chanDesc = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    chanDesc:SetPoint("TOPLEFT", x0, -372)
+    chanDesc:SetPoint("RIGHT",  content, "RIGHT", -x0, 0)
     chanDesc:SetJustifyH("LEFT")
-    chanDesc:SetText(
-        "|cFF888888Blacklist alert messages are sent here.\n" ..
-        "Falls back to PARTY if not in a raid, SAY if not in any group.|r"
-    )
+    chanDesc:SetText("|cFF888888Alert messages are sent here. Falls back to PARTY if not in a raid, SAY if not grouped.|r")
 
-    -- ── Context Menu info ─────────────────────────────────
-    SectionHeader(panel, "Chat Context Menu", -402)
+    -- ── Export / Import ────────────────────────────────────
+    SectionHeader(content, "Export / Import", -412)
 
-    local ctxDesc = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ctxDesc:SetPoint("TOPLEFT", x0, -422)
-    ctxDesc:SetPoint("RIGHT", -x0, 0)
-    ctxDesc:SetJustifyH("LEFT")
-    ctxDesc:SetText(
-        "|cFF888888Right-click any player name in chat, party/raid frames, or the friends list:\n" ..
-        "|cFFFFCC00Add to Blacklist|r  — opens Add Player with the name pre-filled.\n" ..
-        "|cFFFF8888Remove from Blacklist|r  — removes the player immediately.|r"
-    )
+    local expDesc = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    expDesc:SetPoint("TOPLEFT", x0, -432)
+    expDesc:SetPoint("RIGHT",  content, "RIGHT", -x0, 0)
+    expDesc:SetJustifyH("LEFT")
+    expDesc:SetText("|cFF888888Share your blacklist with another player.\nExport generates a string — copy it and paste it in Discord or chat.\nThe other player pastes it in the Import box below and clicks Import.|r")
+
+    -- Export button
+    local exportBtn = MakeButton(content, "Export Blacklist", 160, 26)
+    exportBtn:SetPoint("TOPLEFT", x0, -476)
+
+    -- Export string display box
+    local exportEB = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+    exportEB:SetSize(cw - x0 - 14, 26)
+    exportEB:SetPoint("TOPLEFT", x0, -510)
+    exportEB:SetAutoFocus(false)
+    exportEB:SetMaxLetters(0)
+    exportEB:SetScript("OnMouseUp", function(self)
+        self:SetFocus()
+        self:HighlightText()
+    end)
+    BV._exportEB = exportEB
+
+    local exportHint = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    exportHint:SetPoint("TOPLEFT", x0, -540)
+    exportHint:SetText("|cFF555555Click the box to select all  •  Ctrl+C to copy|r")
+
+    exportBtn:SetScript("OnClick", function()
+        if not BV.DB or (#BV.DB.reasons == 0 and #BV.DB.blacklist == 0) then
+            BV._exportEB:SetText("")
+            if BV._exportStatusFS then
+                BV._exportStatusFS:SetText("|cFFFF8888Nothing to export — the blacklist is empty.|r")
+            end
+            return
+        end
+        local str = BV:ExportData()
+        BV._exportEB:SetText(str)
+        BV._exportEB:SetFocus()
+        BV._exportEB:HighlightText()
+        if BV._exportStatusFS then BV._exportStatusFS:SetText("") end
+    end)
+
+    local exportStatusFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    exportStatusFS:SetPoint("LEFT",  exportBtn, "RIGHT", 8, 0)
+    exportStatusFS:SetPoint("RIGHT", content,   "RIGHT", -x0, 0)
+    exportStatusFS:SetJustifyH("LEFT")
+    BV._exportStatusFS = exportStatusFS
+
+    -- Import label
+    local importLabel = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    importLabel:SetPoint("TOPLEFT", x0, -558)
+    importLabel:SetText("Import (paste a string from another player):")
+
+    -- Import paste box
+    local importEB = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+    importEB:SetSize(cw - x0 - 14, 26)
+    importEB:SetPoint("TOPLEFT", x0, -578)
+    importEB:SetAutoFocus(false)
+    importEB:SetMaxLetters(0)
+    importEB:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+    BV._importEB = importEB
+
+    -- Replace checkbox
+    local replaceCB = MakeCheckbox(content, "Replace my existing data  (default: merge / skip duplicates)")
+    replaceCB:SetPoint("TOPLEFT", x0, -614)
+    replaceCB:SetChecked(false)
+    BV._importReplaceCB = replaceCB
+
+    -- Import button + status
+    local importBtn = MakeButton(content, "Import", 120, 26)
+    importBtn:SetPoint("TOPLEFT", x0, -644)
+
+    local importStatusFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    importStatusFS:SetPoint("LEFT",  importBtn, "RIGHT", 10, 0)
+    importStatusFS:SetPoint("RIGHT", content,   "RIGHT", -x0, 0)
+    importStatusFS:SetJustifyH("LEFT")
+    BV._importStatusFS = importStatusFS
+
+    importBtn:SetScript("OnClick", function()
+        local str     = (BV._importEB:GetText() or ""):match("^%s*(.-)%s*$")
+        local replace = BV._importReplaceCB:GetChecked() == 1 or BV._importReplaceCB:GetChecked() == true
+        local ok, msg = BV:ImportData(str, replace)
+        if ok then
+            BV._importStatusFS:SetText("|cFF88FF88" .. msg .. "|r")
+            BV._importEB:SetText("")
+            BV:RefreshReasonsList()
+            BV:RefreshBlacklistList()
+            BV:UpdateTabBadges()
+        else
+            BV._importStatusFS:SetText("|cFFFF6666" .. msg .. "|r")
+        end
+    end)
+
+    -- Total content height
+    content:SetHeight(680)
 end
 
+-- =========================================================
+-- RefreshSettings  (called when Settings tab is opened)
+-- =========================================================
 function BV:RefreshSettings()
-    if BV._scaleSlider and BV.DB then
-        local sv = math.floor((BV.DB.uiScale or 1.0) * 100)
-        BV._scaleSlider:SetValue(sv)
-        BV._scaleSlider._valFS:SetText(sv .. "%")
+    if not BV.DB then return end
+
+    if BV._scaleSlider then
+        local v = math.floor((BV.DB.uiScale or 1.0) * 100)
+        BV._scaleSlider:SetValue(v)
+        BV._scaleSlider._valFS:SetText(v .. "%")
     end
-    if BV._durSlider and BV.DB then
-        local dv = BV.DB.alertDuration or 8
-        BV._durSlider:SetValue(dv)
-        BV._durSlider._valFS:SetText(dv .. "s")
+
+    if BV._durSlider then
+        local v = BV.DB.alertDuration or 8
+        BV._durSlider:SetValue(v)
+        BV._durSlider._valFS:SetText(v .. "s")
     end
-    if BV._soundCB and BV.DB then
+
+    if BV._soundCB then
         BV._soundCB:SetChecked(BV.DB.alertSound ~= false)
     end
-    if BV._minimapCB and BV.DB then
+
+    if BV._minimapCB then
         BV._minimapCB:SetChecked(not (BV.DB.minimap and BV.DB.minimap.hide))
     end
-    if BV._settingsChanDD and BV.DB then
+
+    if BV._settingsChanDD then
         BV._settingsChanDD:SetItems(CHANNEL_ITEMS)
         BV._settingsChanDD:SetValue(BV.DB.globalChannel or "PARTY")
     end
+
+    -- Clear export/import status messages on open
+    if BV._exportStatusFS then BV._exportStatusFS:SetText("") end
+    if BV._importStatusFS then BV._importStatusFS:SetText("") end
+    if BV._exportEB        then BV._exportEB:SetText("") end
 end
 
 -- =========================================================
--- Alert Reset
+-- Tab badges  (count labels on tab headers)
 -- =========================================================
-function BV:ResetAlertPosition()
-    if _G["BVAlertFrame"] then
-        _G["BVAlertFrame"]:ClearAllPoints()
-        _G["BVAlertFrame"]:SetPoint("TOP", UIParent, "TOP", 0, -160)
-        print("|cFF00AAFFBlacklist by Vovo:|r Alert banner position reset.")
+function BV:UpdateTabBadges()
+    if not BV.DB then return end
+    local rc = #(BV.DB.reasons   or {})
+    local bc = #(BV.DB.blacklist or {})
+    if BV._tabLabelR then
+        BV._tabLabelR:SetText("Reasons" .. (rc > 0 and " |cFFAAAAAA(" .. rc .. ")|r" or ""))
+    end
+    if BV._tabLabelB then
+        BV._tabLabelB:SetText("Blacklisted" .. (bc > 0 and " |cFFAAAAAA(" .. bc .. ")|r" or ""))
     end
 end
 
 -- =========================================================
--- Reason Modal (Add / Edit)
+-- Toggle (open / close)
 -- =========================================================
-local _reasonModal = nil
-
-function BV:ShowReasonModal(existingReason)
-    if not _reasonModal then
-        _reasonModal = CreateModal("BVReasonModal", 430, 215, "Add Reason")
-        local c = _reasonModal.content
-
-        local nameLabel = c:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        nameLabel:SetPoint("TOPLEFT", 4, -4); nameLabel:SetText("Reason Name:")
-
-        local nameEB = CreateFrame("EditBox", nil, c, "InputBoxTemplate")
-        nameEB:SetSize(390, 26); nameEB:SetPoint("TOPLEFT", 4, -22)
-        nameEB:SetAutoFocus(false); nameEB:SetMaxLetters(40)
-        nameEB:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-        _reasonModal.nameEB = nameEB
-
-        local msgLabel = c:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        msgLabel:SetPoint("TOPLEFT", 4, -57); msgLabel:SetText("Message:")
-
-        local msgHint = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        msgHint:SetPoint("TOPLEFT", 4, -73)
-        msgHint:SetText("|cFF888888Use {{username}} to insert the player's name|r")
-
-        local msgEB = CreateFrame("EditBox", nil, c, "InputBoxTemplate")
-        msgEB:SetSize(390, 26); msgEB:SetPoint("TOPLEFT", 4, -91)
-        msgEB:SetAutoFocus(false); msgEB:SetMaxLetters(255)
-        msgEB:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-        _reasonModal.msgEB = msgEB
-
-        local saveBtn = MakeButton(c, "Save", 160, 26)
-        saveBtn:SetPoint("BOTTOMLEFT", 4, 4)
-        saveBtn:SetScript("OnClick", function()
-            local name = (_reasonModal.nameEB:GetText() or ""):match("^%s*(.-)%s*$")
-            local msg  = _reasonModal.msgEB:GetText() or ""
-            if name == "" then _reasonModal.nameEB:SetTextColor(1, 0.3, 0.3); return end
-            _reasonModal.nameEB:SetTextColor(1, 1, 1)
-            if _reasonModal._editing then
-                _reasonModal._editing.name    = name
-                _reasonModal._editing.message = msg
-            else
-                BV:AddReason(name, msg)
-            end
-            _reasonModal:Hide()
-            BV:RefreshReasonsList()
-        end)
-
-        local cancelBtn = MakeButton(c, "Cancel", 160, 26)
-        cancelBtn:SetPoint("BOTTOMRIGHT", -4, 4)
-        cancelBtn:SetScript("OnClick", function() _reasonModal:Hide() end)
+function BV:ToggleMainWindow()
+    if not BV.mainFrame then
+        BV:BuildMainWindow()
+        BV:BuildTabs(BV.mainFrame)
     end
 
-    _reasonModal._editing = existingReason
-    if existingReason then
-        _reasonModal.titleFS:SetText("Edit Reason")
-        _reasonModal.nameEB:SetText(existingReason.name    or "")
-        _reasonModal.msgEB:SetText(existingReason.message  or "")
+    if BV.mainFrame:IsShown() then
+        BV:SaveWindowPos()
+        BV.mainFrame:Hide()
     else
-        _reasonModal.titleFS:SetText("Add Reason")
-        _reasonModal.nameEB:SetText("")
-        _reasonModal.msgEB:SetText("")
+        BV:RestoreWindowPos()
+        BV:ApplyScale()
+        BV:UpdateTabBadges()
+        BV.mainFrame:Show()
+        if BV._showTab then BV._showTab(BV._activeTab or "reasons") end
     end
-    _reasonModal.nameEB:SetTextColor(1, 1, 1)
-    _reasonModal:Open()
-    _reasonModal.nameEB:SetFocus()
-end
-
--- =========================================================
--- Player Modal (Add / Edit)
--- =========================================================
-local _playerModal = nil
-
-function BV:ShowPlayerModal(existingEntry, prefillName)
-    local reasons = (BV.DB and BV.DB.reasons) or {}
-    if #reasons == 0 then
-        print("|cFF00AAFFBlacklist by Vovo:|r Add at least one reason first (Reasons tab).")
-        return
-    end
-
-    if not _playerModal then
-        _playerModal = CreateModal("BVPlayerModal", 390, 210, "Add Player")
-        local c = _playerModal.content
-
-        local nameLabel = c:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        nameLabel:SetPoint("TOPLEFT", 4, -4); nameLabel:SetText("Player Name:")
-
-        local nameEB = CreateFrame("EditBox", nil, c, "InputBoxTemplate")
-        nameEB:SetSize(350, 26); nameEB:SetPoint("TOPLEFT", 4, -22)
-        nameEB:SetAutoFocus(false); nameEB:SetMaxLetters(50)
-        nameEB:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-        _playerModal.nameEB = nameEB
-
-        local reasonLabel = c:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        reasonLabel:SetPoint("TOPLEFT", 4, -57); reasonLabel:SetText("Reason:")
-
-        local reasonDD = CreateDropdown(c, 280)
-        reasonDD:SetPoint("TOPLEFT", 4, -75)
-        _playerModal.reasonDD = reasonDD
-
-        local saveBtn = MakeButton(c, "Save", 160, 26)
-        saveBtn:SetPoint("BOTTOMLEFT", 4, 4)
-        saveBtn:SetScript("OnClick", function()
-            local uname = (_playerModal.nameEB:GetText() or ""):match("^%s*(.-)%s*$")
-            local rid   = _playerModal.reasonDD:GetValue()
-            if uname == "" then _playerModal.nameEB:SetTextColor(1, 0.3, 0.3); return end
-            if not rid then
-                print("|cFF00AAFFBlacklist by Vovo:|r Please select a reason."); return
-            end
-            _playerModal.nameEB:SetTextColor(1, 1, 1)
-            if _playerModal._editing then
-                _playerModal._editing.username = uname
-                _playerModal._editing.key      = uname:lower()
-                _playerModal._editing.reasonId = rid
-            else
-                BV:AddToBlacklist(uname, rid)
-            end
-            _playerModal:Hide()
-            BV:RefreshBlacklistList()
-        end)
-
-        local cancelBtn = MakeButton(c, "Cancel", 160, 26)
-        cancelBtn:SetPoint("BOTTOMRIGHT", -4, 4)
-        cancelBtn:SetScript("OnClick", function() _playerModal:Hide() end)
-    end
-
-    local items = {}
-    for _, r in ipairs(reasons) do
-        table.insert(items, { text = r.name, value = r.id })
-    end
-    _playerModal.reasonDD:SetItems(items)
-
-    _playerModal._editing = existingEntry
-    if existingEntry then
-        _playerModal.titleFS:SetText("Edit Player")
-        _playerModal.nameEB:SetText(existingEntry.username or "")
-        _playerModal.reasonDD:SetValue(existingEntry.reasonId)
-    else
-        _playerModal.titleFS:SetText("Add Player")
-        _playerModal.nameEB:SetText(prefillName or "")
-        _playerModal.reasonDD:SetValue(items[1] and items[1].value or nil)
-    end
-
-    _playerModal.nameEB:SetTextColor(1, 1, 1)
-    _playerModal:Open()
-    _playerModal.nameEB:SetFocus()
-    if prefillName and prefillName ~= "" then
-        _playerModal.nameEB:SetCursorPosition(#prefillName)
-    end
-end
-
--- =========================================================
--- Alert Popup
--- =========================================================
-local _alertTimerSeq = 0
-
-function BV:ShowBlacklistAlert(playerName, reason)
-    local af = _G["BVAlertFrame"]
-    if not af then
-        af = CreateFrame("Frame", "BVAlertFrame", UIParent, "BackdropTemplate")
-        af:SetSize(430, 92)
-        af:SetPoint("TOP", UIParent, "TOP", 0, -160)
-        af:SetFrameStrata("TOOLTIP"); af:SetFrameLevel(300)
-        ApplyBackdrop(af, 0.14, 0.02, 0.02, 0.96, 0.75, 0.10, 0.10, 1)
-        af:Hide()
-        af:EnableMouse(true)
-        af:SetMovable(true); af:RegisterForDrag("LeftButton")
-        af:SetScript("OnDragStart", af.StartMoving)
-        af:SetScript("OnDragStop",  af.StopMovingOrSizing)
-
-        -- Click (no drag) dismisses
-        af:SetScript("OnMouseUp", function(self, btn)
-            if btn == "LeftButton" and not self.dragging then
-                self:Hide()
-            end
-        end)
-        af:SetScript("OnDragStart", function(self, ...) self.dragging = true; self:StartMoving() end)
-        af:SetScript("OnDragStop",  function(self, ...) self.dragging = false; self:StopMovingOrSizing() end)
-
-        local iconFS = af:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        iconFS:SetPoint("LEFT", 12, 2); iconFS:SetText("⚠")
-        iconFS:SetTextColor(1, 0.3, 0.1, 1)
-
-        local nameFS = af:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        nameFS:SetPoint("TOPLEFT", 44, -12); nameFS:SetPoint("RIGHT", -10, 0)
-        nameFS:SetJustifyH("LEFT"); af.nameFS = nameFS
-
-        local reasonFS = af:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        reasonFS:SetPoint("TOPLEFT", 44, -34); reasonFS:SetPoint("RIGHT", -10, 0)
-        reasonFS:SetJustifyH("LEFT"); af.reasonFS = reasonFS
-
-        local msgFS = af:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        msgFS:SetPoint("TOPLEFT", 44, -54); msgFS:SetPoint("RIGHT", -10, 0)
-        msgFS:SetJustifyH("LEFT"); af.msgFS = msgFS
-
-        local dismissFS = af:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        dismissFS:SetPoint("BOTTOMRIGHT", -8, 6)
-        dismissFS:SetText("|cFF555555Click or drag to move  •  click to dismiss|r")
-    end
-
-    local chan = (BV.DB and BV.DB.globalChannel) or "PARTY"
-    local cc   = CHAN_COLOR[chan] or "AAAAAA"
-
-    af.nameFS:SetText("|cFFFF4444" .. playerName .. "|r  joined your group!")
-    af.reasonFS:SetText("Reason: |cFFFFCC00" .. (reason.name or "") .. "|r")
-
-    local msgPreview = (reason.message or ""):gsub("{{username}}", playerName)
-    if #msgPreview > 55 then msgPreview = msgPreview:sub(1, 52) .. "..." end
-    af.msgFS:SetText("|cFF" .. cc .. "[" .. chan .. "]|r " .. msgPreview)
-
-    af:Show()
-    BV:PlayAlertSound()
-
-    -- Auto-dismiss timer; sequence token prevents stale timer races
-    _alertTimerSeq = _alertTimerSeq + 1
-    local seq = _alertTimerSeq
-    local duration = (BV.DB and BV.DB.alertDuration) or 8
-    C_Timer.After(duration, function()
-        if _alertTimerSeq == seq then
-            local f = _G["BVAlertFrame"]
-            if f then f:Hide() end
-        end
-    end)
 end

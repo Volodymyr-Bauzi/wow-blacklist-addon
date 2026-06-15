@@ -2,9 +2,13 @@
 ## https://github.com/BigWigsMods/packager
 
 package-as: blacklist by Vovo
+curse-id: 1575604
 
 ignore:
   - .pkgmeta
   - .gitignore
   - README.md
   - .github
+  - convert_icon.html
+  - icon.svg
+  - release.ps1
