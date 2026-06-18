@@ -1,0 +1,277 @@
+# Export / Import Feature
+
+Removed from the CurseForge build to comply with their "personal-only" policy.
+Add this back if publishing on **Wago.io**, **GitHub releases**, or any platform without that restriction.
+
+---
+
+## How It Works
+
+Players click **Export** in the Settings tab → get a plain-text string → paste it to a friend via Discord/chat.  
+The friend pastes it into the **Import** box → clicks Import → data merges into their local DB.
+
+No server, no network, no addon-to-addon communication. 100% manual copy-paste.
+
+---
+
+## Serialization Format
+
+```
+BV1;reasonName,message;reasonName2,message2;;player1,reason1;player2,reason2
+```
+
+| Token | Meaning |
+|---|---|
+| `BV1` | Version prefix |
+| `;` | Record separator |
+| `,` | Field separator within a record |
+| `;;` | Empty record — divides the Reasons section from the Blacklist section |
+
+### Encoding (applied to values only)
+
+| Character | Encoded as |
+|---|---|
+| `%` | `%25` (must encode **first**) |
+| `,` | `%2C` |
+| `;` | `%3B` |
+
+Decode in reverse order: `%2C` → `,`, `%3B` → `;`, `%25` → `%` (must decode **last**).
+
+### Example
+
+Reasons: `bad` (msg: `watch out`) and `ninja`  
+Blacklist: `John` → reason `bad`, `Bob` → reason `ninja`
+
+```
+BV1;bad,watch out;ninja,;;John,bad;Bob,ninja
+```
+
+---
+
+## BV_Core.lua — Add These Functions
+
+Place them anywhere before `BV:CreateFallbackMinimapButton()`.
+
+```lua
+-- =========================================================
+-- Export / Import
+-- =========================================================
+local function PctEnc(s)
+    s = tostring(s or "")
+    s = s:gsub("%%", "%%25")   -- MUST be first
+    s = s:gsub(",",  "%%2C")
+    s = s:gsub(";",  "%%3B")
+    return s
+end
+
+local function PctDec(s)
+    s = tostring(s or "")
+    s = s:gsub("%%2C", ",")
+    s = s:gsub("%%3B", ";")
+    s = s:gsub("%%25", "%%")   -- MUST be last
+    return s
+end
+
+function BV:ExportData()
+    if not BV.DB then return "" end
+    local parts = { "BV1" }
+    for _, r in ipairs(BV.DB.reasons or {}) do
+        table.insert(parts, PctEnc(r.name) .. "," .. PctEnc(r.message))
+    end
+    table.insert(parts, "")   -- produces ";;" section divider
+    for _, e in ipairs(BV.DB.blacklist or {}) do
+        local reason = BV:GetReasonById(e.reasonId)
+        table.insert(parts, PctEnc(e.username) .. "," .. PctEnc(reason and reason.name or ""))
+    end
+    return table.concat(parts, ";")
+end
+
+-- replace = true  → wipe existing data first (full replace)
+-- replace = false → merge: skip names/players already present (default)
+function BV:ImportData(str, replace)
+    str = (str or ""):match("^%s*(.-)%s*$")
+    if str == "" then
+        return false, "Paste an export string first."
+    end
+    if str:sub(1, 4) ~= "BV1;" then
+        return false, "Invalid format — must start with BV1."
+    end
+
+    str = str:sub(5)   -- strip "BV1;"
+
+    local divPos     = str:find(";;", 1, true)
+    local reasonsStr = divPos and str:sub(1, divPos - 1) or str
+    local blackStr   = divPos and str:sub(divPos + 2)   or ""
+
+    if replace then
+        BV.DB.reasons   = {}
+        BV.DB.blacklist = {}
+        BV.DB.nextId    = 1
+    end
+
+    local reasonMap = {}
+    for _, r in ipairs(BV.DB.reasons) do
+        reasonMap[r.name:lower()] = r.id
+    end
+
+    local nR, nP = 0, 0
+
+    for record in (reasonsStr .. ";"):gmatch("(.-);") do
+        if record ~= "" then
+            local encN, encM = record:match("^(.-),(.*)$")
+            if encN then
+                local name = PctDec(encN):match("^%s*(.-)%s*$")
+                local msg  = PctDec(encM or "")
+                if name ~= "" and not reasonMap[name:lower()] then
+                    reasonMap[name:lower()] = BV:AddReason(name, msg)
+                    nR = nR + 1
+                end
+            end
+        end
+    end
+
+    for record in (blackStr .. ";"):gmatch("(.-);") do
+        if record ~= "" then
+            local encU, encR = record:match("^(.-),(.*)$")
+            if encU then
+                local uname = PctDec(encU):match("^%s*(.-)%s*$")
+                local rname = PctDec(encR or "")
+                if uname ~= "" then
+                    local rid = reasonMap[rname:lower()]
+                    if not rid and rname ~= "" then
+                        rid = BV:AddReason(rname, "")
+                        reasonMap[rname:lower()] = rid
+                    end
+                    if rid and not BV:GetBlacklistEntry(uname) then
+                        BV:AddToBlacklist(uname, rid)
+                        nP = nP + 1
+                    end
+                end
+            end
+        end
+    end
+
+    return true, "Done — " .. nR .. " reason(s) and " .. nP .. " player(s) imported."
+end
+```
+
+---
+
+## BV_UI.lua — Settings Panel Section
+
+Add this block **at the end of `BV:BuildSettingsPanel()`**, just before `content:SetHeight(...)`.  
+Also change `content:SetHeight(290)` → `content:SetHeight(680)`.
+
+```lua
+    -- ── Export / Import ────────────────────────────────────
+    SectionHeader(content, "Export / Import", -412)
+
+    local expDesc = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    expDesc:SetPoint("TOPLEFT", x0, -432)
+    expDesc:SetPoint("RIGHT",  content, "RIGHT", -x0, 0)
+    expDesc:SetJustifyH("LEFT")
+    expDesc:SetText("|cFF888888Share your blacklist with another player.\nExport generates a string — copy it and paste it in Discord or chat.\nThe other player pastes it in the Import box below and clicks Import.|r")
+
+    local exportBtn = MakeButton(content, "Export Blacklist", 160, 26)
+    exportBtn:SetPoint("TOPLEFT", x0, -476)
+
+    local exportEB = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+    exportEB:SetSize(cw - x0 - 14, 26)
+    exportEB:SetPoint("TOPLEFT", x0, -510)
+    exportEB:SetAutoFocus(false)
+    exportEB:SetMaxLetters(0)
+    exportEB:SetScript("OnMouseUp", function(self)
+        self:SetFocus()
+        self:HighlightText()
+    end)
+    BV._exportEB = exportEB
+
+    local exportHint = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    exportHint:SetPoint("TOPLEFT", x0, -540)
+    exportHint:SetText("|cFF555555Click the box to select all  •  Ctrl+C to copy|r")
+
+    local exportStatusFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    exportStatusFS:SetPoint("LEFT",  exportBtn, "RIGHT", 8, 0)
+    exportStatusFS:SetPoint("RIGHT", content,   "RIGHT", -x0, 0)
+    exportStatusFS:SetJustifyH("LEFT")
+    BV._exportStatusFS = exportStatusFS
+
+    exportBtn:SetScript("OnClick", function()
+        if not BV.DB or (#BV.DB.reasons == 0 and #BV.DB.blacklist == 0) then
+            BV._exportEB:SetText("")
+            BV._exportStatusFS:SetText("|cFFFF8888Nothing to export — the blacklist is empty.|r")
+            return
+        end
+        local str = BV:ExportData()
+        BV._exportEB:SetText(str)
+        BV._exportEB:SetFocus()
+        BV._exportEB:HighlightText()
+        BV._exportStatusFS:SetText("")
+    end)
+
+    local importLabel = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    importLabel:SetPoint("TOPLEFT", x0, -558)
+    importLabel:SetText("Import (paste a string from another player):")
+
+    local importEB = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+    importEB:SetSize(cw - x0 - 14, 26)
+    importEB:SetPoint("TOPLEFT", x0, -578)
+    importEB:SetAutoFocus(false)
+    importEB:SetMaxLetters(0)
+    importEB:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+    BV._importEB = importEB
+
+    local replaceCB = MakeCheckbox(content, "Replace my existing data  (default: merge / skip duplicates)")
+    replaceCB:SetPoint("TOPLEFT", x0, -614)
+    replaceCB:SetChecked(false)
+    BV._importReplaceCB = replaceCB
+
+    local importBtn = MakeButton(content, "Import", 120, 26)
+    importBtn:SetPoint("TOPLEFT", x0, -644)
+
+    local importStatusFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    importStatusFS:SetPoint("LEFT",  importBtn, "RIGHT", 10, 0)
+    importStatusFS:SetPoint("RIGHT", content,   "RIGHT", -x0, 0)
+    importStatusFS:SetJustifyH("LEFT")
+    BV._importStatusFS = importStatusFS
+
+    importBtn:SetScript("OnClick", function()
+        local str     = (BV._importEB:GetText() or ""):match("^%s*(.-)%s*$")
+        local replace = BV._importReplaceCB:GetChecked() == 1 or BV._importReplaceCB:GetChecked() == true
+        local ok, msg = BV:ImportData(str, replace)
+        if ok then
+            BV._importStatusFS:SetText("|cFF88FF88" .. msg .. "|r")
+            BV._importEB:SetText("")
+            BV:RefreshReasonsList()
+            BV:RefreshBlacklistList()
+            BV:UpdateTabBadges()
+        else
+            BV._importStatusFS:SetText("|cFFFF6666" .. msg .. "|r")
+        end
+    end)
+```
+
+---
+
+## BV_UI.lua — RefreshSettings Cleanup
+
+Add these three lines at the end of `BV:RefreshSettings()`, before the closing `end`:
+
+```lua
+    if BV._exportStatusFS then BV._exportStatusFS:SetText("") end
+    if BV._importStatusFS then BV._importStatusFS:SetText("") end
+    if BV._exportEB        then BV._exportEB:SetText("") end
+```
+
+---
+
+## Checklist
+
+- [ ] Add `PctEnc`, `PctDec`, `BV:ExportData()`, `BV:ImportData()` to `BV_Core.lua`
+- [ ] Add the Export/Import UI block to `BV:BuildSettingsPanel()` in `BV_UI.lua`
+- [ ] Change `content:SetHeight(290)` → `content:SetHeight(680)` in `BuildSettingsPanel`
+- [ ] Add the three `RefreshSettings` cleanup lines in `BV_UI.lua`
+- [ ] Update CurseForge / Wago project description to mention manual text-string sharing

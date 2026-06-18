@@ -1,7 +1,8 @@
 # release.ps1 — Blacklist by Vovo release helper
 # Usage:  .\release.ps1 1.0.0
 # This script bumps the TOC version, commits, tags, and pushes.
-# GitHub Actions then auto-publishes the new version to CurseForge.
+# GitHub Actions then auto-publishes the new version to configured providers
+# such as CurseForge and Wago.
 
 param(
     [Parameter(Mandatory, HelpMessage="Version number, e.g. 1.0.1")]
@@ -39,6 +40,6 @@ git push origin "v$Version"
 Write-Host "  [4/4] Pushed to GitHub" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "Done! GitHub Actions will package and publish v$Version to CurseForge." -ForegroundColor Cyan
+Write-Host "Done! GitHub Actions will package and publish v$Version to configured providers." -ForegroundColor Cyan
 Write-Host "Watch the progress at: https://github.com/Volodymyr-Bauzi/wow-blacklist-addon/actions"
 Write-Host ""

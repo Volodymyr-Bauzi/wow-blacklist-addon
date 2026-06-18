@@ -10,6 +10,7 @@ A World of Warcraft TBC Anniversary (2.5.4) addon that lets you maintain a persi
 - **`{{username}}` placeholder** — message templates auto-fill the player's name  
 - **Chat context menu** — right-click any player name to add/remove from blacklist instantly  
 - **Settings tab** — global output channel, window scale, alert duration, sound toggle  
+- **Export / import** — copy a plain-text share string to send through Discord/chat and merge it manually on another client
 - **Minimap button** — LDB/LibDBIcon compatible with manual fallback  
 
 ## Slash Commands
@@ -40,8 +41,9 @@ Install via the CurseForge or Wago app — search for **Blacklist by Vovo**.
 
 1. Open the addon (`/bv`)
 2. **Reasons tab** — click `+ Add Reason`, give it a name and optional message (use `{{username}}` for the player name)
-3. **Blacklisted Players tab** — click `+ Add Player`, enter the name, choose a reason
-4. **Settings tab** — pick the output channel, adjust scale/duration, toggle sound
+3. Right-click a player name in chat, party, raid, or friends list and choose `Add to Blacklist`
+4. **Blacklisted Players tab** — search and remove existing entries
+5. **Settings tab** — pick the output channel, adjust scale/duration, toggle sound, and use Export / Import to share data manually
 
 When a blacklisted player joins your party or raid, you'll see an alert banner and the message is sent to the configured channel automatically.
 

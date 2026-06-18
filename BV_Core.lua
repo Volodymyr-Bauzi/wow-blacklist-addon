@@ -201,6 +201,111 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 end)
 
 -- =========================================================
+-- Export / Import
+-- =========================================================
+local function PctEnc(s)
+    s = tostring(s or "")
+    s = s:gsub("%%", "%%25")
+    s = s:gsub(",", "%%2C")
+    s = s:gsub(";", "%%3B")
+    return s
+end
+
+local function PctDec(s)
+    s = tostring(s or "")
+    s = s:gsub("%%2C", ",")
+    s = s:gsub("%%3B", ";")
+    s = s:gsub("%%25", "%%")
+    return s
+end
+
+function BV:ExportData()
+    if not BV.DB then return "" end
+
+    local parts = { "BV1" }
+
+    for _, r in ipairs(BV.DB.reasons or {}) do
+        table.insert(parts, PctEnc(r.name) .. "," .. PctEnc(r.message))
+    end
+
+    table.insert(parts, "")
+
+    for _, e in ipairs(BV.DB.blacklist or {}) do
+        local reason = BV:GetReasonById(e.reasonId)
+        table.insert(parts, PctEnc(e.username) .. "," .. PctEnc(reason and reason.name or ""))
+    end
+
+    return table.concat(parts, ";")
+end
+
+function BV:ImportData(str, replace)
+    str = (str or ""):match("^%s*(.-)%s*$")
+    if str == "" then
+        return false, "Paste an export string first."
+    end
+
+    if str:sub(1, 4) ~= "BV1;" then
+        return false, "Invalid format - must start with BV1."
+    end
+
+    str = str:sub(5)
+
+    local divPos = str:find(";;", 1, true)
+    local reasonsStr = divPos and str:sub(1, divPos - 1) or str
+    local blackStr = divPos and str:sub(divPos + 2) or ""
+
+    if replace then
+        BV.DB.reasons = {}
+        BV.DB.blacklist = {}
+        BV.DB.nextId = 1
+    end
+
+    local reasonMap = {}
+    for _, r in ipairs(BV.DB.reasons or {}) do
+        reasonMap[(r.name or ""):lower()] = r.id
+    end
+
+    local nR, nP = 0, 0
+
+    for record in (reasonsStr .. ";"):gmatch("(.-);") do
+        if record ~= "" then
+            local encN, encM = record:match("^(.-),(.*)$")
+            if encN then
+                local name = PctDec(encN):match("^%s*(.-)%s*$")
+                local msg = PctDec(encM or "")
+                if name ~= "" and not reasonMap[name:lower()] then
+                    reasonMap[name:lower()] = BV:AddReason(name, msg)
+                    nR = nR + 1
+                end
+            end
+        end
+    end
+
+    for record in (blackStr .. ";"):gmatch("(.-);") do
+        if record ~= "" then
+            local encU, encR = record:match("^(.-),(.*)$")
+            if encU then
+                local uname = PctDec(encU):match("^%s*(.-)%s*$")
+                local rname = PctDec(encR or "")
+                if uname ~= "" then
+                    local rid = reasonMap[rname:lower()]
+                    if not rid and rname ~= "" then
+                        rid = BV:AddReason(rname, "")
+                        reasonMap[rname:lower()] = rid
+                    end
+                    if rid and not BV:GetBlacklistEntry(uname) then
+                        BV:AddToBlacklist(uname, rid)
+                        nP = nP + 1
+                    end
+                end
+            end
+        end
+    end
+
+    return true, "Done - " .. nR .. " reason(s) and " .. nP .. " player(s) imported."
+end
+
+-- =========================================================
 -- Minimap
 -- =========================================================
 function BV:InitMinimap()
