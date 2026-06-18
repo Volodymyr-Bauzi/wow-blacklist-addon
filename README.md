@@ -1,4 +1,4 @@
-![addon-icon](https://github.com/Volodymyr-Bauzi/wow-blacklist-addon/edit/main/blacklist-by-vovo.png)
+![addon-icon](https://github.com/Volodymyr-Bauzi/wow-blacklist-addon/main/blacklist-by-vovo.png)
 # Blacklist by Vovo
 
 A World of Warcraft TBC Anniversary (2.5.4) addon that lets you maintain a persistent blacklist of players with custom warning reasons. When a blacklisted player joins your group, you get an alert banner and an automatic chat message.
